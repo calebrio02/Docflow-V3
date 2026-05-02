@@ -1,0 +1,382 @@
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Table from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
+import TextAlign from '@tiptap/extension-text-align';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import {
+  Bold,
+  Italic,
+  Strikethrough,
+  Code,
+  CodeXml,
+  Heading1,
+  Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  CheckSquare,
+  Quote,
+  Undo,
+  Redo,
+  FileText,
+  Minus,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Table as TableIcon,
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+} from 'lucide-react';
+
+const initialContent = `
+<h1>Welcome to Docflow</h1>
+<p>This is a <strong>draft-mode</strong> editor powered by TipTap. Start writing your next idea here.</p>
+<hr />
+<h2>Quick Reference</h2>
+<p>Use the toolbar above to format your content. Here are some examples of what you can create:</p>
+<ul>
+<li><strong>Bullet lists</strong> — for quick notes and checklists</li>
+<li><strong>Numbered lists</strong> — for ordered steps and rankings</li>
+<li><strong>Blockquotes</strong> — for citations and callouts</li>
+<li><strong>Tables</strong> — for structured data</li>
+<li><strong>Dividers</strong> — to separate sections</li>
+<li><strong>Todo Lists</strong> — for checkable items</li>
+</ul>
+<ul data-type="taskList">
+<li data-type="taskItem" data-checked="false"><p>Build editor with TipTap</p></li>
+<li data-type="taskItem" data-checked="true"><p>Add tables and alignment</p></li>
+<li data-type="taskItem" data-checked="true"><p>Add todo lists</p></li>
+<li data-type="taskItem" data-checked="false"><p>Connect backend (Fase 2)</p></li>
+</ul>
+<blockquote>
+<p>This is a blockquote. Great for highlighting important thoughts.</p>
+</blockquote>
+<h3>Inline Formatting</h3>
+<p>You can write <code>inline code</code> for technical references, or use a full code block:</p>
+<pre><code>function greet(name) {
+  console.log(\`Hello, \${name}!\`);
+}
+</code></pre>
+<h3>Table Example</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Status</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Editor</td>
+<td>Done</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Tables</td>
+<td>Done</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>Backend</td>
+<td>Pending</td>
+<td>High</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p>Keep drafting — your changes are local only in this <em>Draft Mode</em>.</p>
+`;
+
+function Toolbar({ editor }) {
+  if (!editor) return null;
+
+  const buttonClass =
+    'inline-flex items-center justify-center w-9 h-9 rounded-lg text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors';
+  const activeClass =
+    'inline-flex items-center justify-center w-9 h-9 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors';
+  const dividerClass = 'w-px h-6 bg-slate-300 mx-1 self-center';
+
+  const Btn = ({ pred, icon: Icon, active }) => (
+    <button
+      type="button"
+      className={active ? activeClass : buttonClass}
+      onClick={() => pred()}
+      title={pred.name}
+    >
+      <Icon size={18} strokeWidth={2} />
+    </button>
+  );
+
+  return (
+    <div className="flex items-center gap-0.5 px-3 py-2 bg-white flex-wrap">
+      <button
+        type="button"
+        className={buttonClass}
+        onClick={() => editor.chain().focus().undo().run()}
+        disabled={!editor.can().undo()}
+      >
+        <Undo size={18} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        className={buttonClass}
+        onClick={() => editor.chain().focus().redo().run()}
+        disabled={!editor.can().redo()}
+      >
+        <Redo size={18} strokeWidth={2} />
+      </button>
+
+      <div className={dividerClass} />
+
+      <Btn
+        pred={() => editor.chain().focus().toggleBold().run()}
+        icon={Bold}
+        active={editor.isActive('bold')}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleItalic().run()}
+        icon={Italic}
+        active={editor.isActive('italic')}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleStrike().run()}
+        icon={Strikethrough}
+        active={editor.isActive('strike')}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleCode().run()}
+        icon={Code}
+        active={editor.isActive('code')}
+      />
+
+      <div className={dividerClass} />
+
+      <Btn
+        pred={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+        icon={Heading1}
+        active={editor.isActive('heading', { level: 1 })}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+        icon={Heading2}
+        active={editor.isActive('heading', { level: 2 })}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+        icon={Heading3}
+        active={editor.isActive('heading', { level: 3 })}
+      />
+
+      <div className={dividerClass} />
+
+      <Btn
+        pred={() => editor.chain().focus().setTextAlign('left').run()}
+        icon={AlignLeft}
+        active={editor.isActive({ textAlign: 'left' })}
+      />
+      <Btn
+        pred={() => editor.chain().focus().setTextAlign('center').run()}
+        icon={AlignCenter}
+        active={editor.isActive({ textAlign: 'center' })}
+      />
+      <Btn
+        pred={() => editor.chain().focus().setTextAlign('right').run()}
+        icon={AlignRight}
+        active={editor.isActive({ textAlign: 'right' })}
+      />
+
+      <div className={dividerClass} />
+
+      <Btn
+        pred={() => editor.chain().focus().toggleBulletList().run()}
+        icon={List}
+        active={editor.isActive('bulletList')}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleOrderedList().run()}
+        icon={ListOrdered}
+        active={editor.isActive('orderedList')}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleTaskList().run()}
+        icon={CheckSquare}
+        active={editor.isActive('taskList')}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleBlockquote().run()}
+        icon={Quote}
+        active={editor.isActive('blockquote')}
+      />
+      <Btn
+        pred={() => editor.chain().focus().toggleCodeBlock().run()}
+        icon={CodeXml}
+        active={editor.isActive('codeBlock')}
+      />
+
+      <div className={dividerClass} />
+
+      <Btn
+        pred={() => editor.chain().focus().setHorizontalRule().run()}
+        icon={Minus}
+      />
+
+      <div className={dividerClass} />
+
+      <Btn
+        pred={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+        icon={TableIcon}
+      />
+      <Btn
+        pred={() => editor.chain().focus().insertTable({ rows: 3, cols: 4, withHeaderRow: false }).run()}
+        icon={Plus}
+      />
+
+      <div className={dividerClass} />
+
+      <button
+        type="button"
+        className={buttonClass}
+        onClick={() => editor.chain().focus().addColumnBefore().run()}
+        title="Add column before"
+      >
+        <ArrowLeft size={18} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        className={buttonClass}
+        onClick={() => editor.chain().focus().addColumnAfter().run()}
+        title="Add column after"
+      >
+        <ArrowRight size={18} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        className={buttonClass}
+        onClick={() => editor.chain().focus().addRowBefore().run()}
+        title="Add row before"
+      >
+        <ArrowUp size={18} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        className={buttonClass}
+        onClick={() => editor.chain().focus().addRowAfter().run()}
+        title="Add row after"
+      >
+        <ArrowDown size={18} strokeWidth={2} />
+      </button>
+
+      <div className={dividerClass} />
+
+      <button
+        type="button"
+        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"
+        onClick={() => editor.chain().focus().deleteColumn().run()}
+        title="Delete column"
+      >
+        <Trash2 size={18} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"
+        onClick={() => editor.chain().focus().deleteRow().run()}
+        title="Delete row"
+      >
+        <Trash2 size={18} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"
+        onClick={() => editor.chain().focus().deleteTable().run()}
+        title="Delete table"
+      >
+        <Trash2 size={18} strokeWidth={2} />
+      </button>
+    </div>
+  );
+}
+
+export default function App() {
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: {
+          levels: [1, 2, 3],
+        },
+      }),
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
+        alignments: ['left', 'center', 'right'],
+        defaultAlignment: 'left',
+      }),
+      Table.configure({
+        resizable: true,
+        lastColumnResizable: true,
+        allowTableInSelection: true,
+      }),
+      TableRow,
+      TableCell.configure({
+        HTMLAttributes: {
+          class: 'border border-slate-300 p-2 min-w-[120px]',
+        },
+      }),
+      TableHeader.configure({
+        HTMLAttributes: {
+          class: 'border border-slate-300 p-2 min-w-[120px] bg-slate-100 font-semibold text-slate-900',
+        },
+      }),
+      TaskList.configure({
+        HTMLAttributes: {
+          class: 'not-prose pl-2',
+        },
+      }),
+      TaskItem.configure({
+        nested: true,
+        HTMLAttributes: {
+          class: 'flex items-start gap-2 -ml-4 py-0.5',
+        },
+      }),
+    ],
+    content: initialContent,
+    editorProps: {
+      attributes: {
+        class: 'prose prose-slate max-w-none focus:outline-none min-h-[600px] px-2',
+      },
+    },
+  });
+
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-100">
+      <header className="sticky top-0 z-50 bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-3 shadow-sm">
+        <FileText className="text-blue-600" size={24} strokeWidth={2} />
+        <h1 className="text-lg font-semibold text-slate-800">Docflow</h1>
+        <span className="ml-2 px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-full">
+          Draft Mode
+        </span>
+      </header>
+
+      <div className="sticky top-[48px] z-40 bg-white border-b border-slate-200 shadow-sm">
+        <div className="max-w-3xl mx-auto px-4">
+          <Toolbar editor={editor} />
+        </div>
+      </div>
+
+      <main className="flex-1 flex justify-center pt-8 pb-8 px-4">
+        <div className="w-full max-w-3xl bg-white rounded-xl shadow-lg shadow-slate-200/60">
+          <div className="px-8 py-6">
+            <EditorContent editor={editor} />
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

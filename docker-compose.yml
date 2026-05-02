@@ -1,0 +1,9 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docflow-web
+    ports:
+      - "8090:80"
+    restart: unless-stopped
