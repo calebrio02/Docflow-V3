@@ -7,6 +7,7 @@ import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import TextAlign from '@tiptap/extension-text-align';
 import TaskList from '@tiptap/extension-task-list';
+import Link from '@tiptap/extension-link';
 import TaskItem from '@tiptap/extension-task-item';
 import {
   Bold,
@@ -30,6 +31,7 @@ import {
   AlignRight,
   Table as TableIcon,
   Trash2,
+  Link2,
 } from 'lucide-react';
 
 const initialContent = `
@@ -184,8 +186,78 @@ function TableContextMenu({ visible, x, y, onClose, onAction }) {
   );
 }
 
+/* ─── Link Modal ─── */
+function LinkModal({ visible, currentUrl, onClose, onSetLink, onUnlink }) {
+  const [url, setUrl] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (visible) {
+      setUrl(currentUrl || '');
+      if (inputRef.current) {
+        setTimeout(() => inputRef.current.focus(), 50);
+      }
+    }
+  }, [visible, currentUrl]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'Enter' && url.trim()) handleConfirm();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [visible, url, onClose, onSetLink]);
+
+  const handleConfirm = () => {
+    if (!url.trim()) return;
+    onSetLink(url.trim());
+    onClose();
+  };
+
+  if (!visible) return null;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/20">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 w-[380px]">
+        <p className="text-sm font-medium text-slate-800 mb-3">
+          {currentUrl ? 'Editar hipervínculo' : 'Añadir hipervínculo'}
+        </p>
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://..."
+            className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          {currentUrl && (
+            <button
+              type="button"
+              onClick={() => { onUnlink(); onClose(); }}
+              className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+            >
+              <Trash2 size={18} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleConfirm}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Toolbar ─── */
-function Toolbar({ editor }) {
+function Toolbar({ editor, onOpenLinkModal }) {
+  const currentLink = editor?.isActive('link') ? editor.getAttributes('link').href : null;
   if (!editor) return null;
 
   const buttonClass =
@@ -248,6 +320,14 @@ function Toolbar({ editor }) {
         icon={Code}
         active={editor.isActive('code')}
       />
+      <button
+        type="button"
+        className={editor.isActive('link') ? activeClass : buttonClass}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => onOpenLinkModal(currentLink)}
+      >
+        <Link2 size={18} strokeWidth={2} />
+      </button>
 
       <div className={dividerClass} />
 
@@ -334,6 +414,8 @@ function Toolbar({ editor }) {
 export default function App() {
   const [menuVisible, setMenuVisible] = useState(false);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [currentLinkUrl, setCurrentLinkUrl] = useState('');
 
   const editor = useEditor({
     extensions: [
@@ -372,6 +454,11 @@ export default function App() {
         nested: true,
         HTMLAttributes: {
           class: 'flex items-start gap-2 -ml-4 py-0.5',
+        },
+      }),
+      Link.configure({
+        HTMLAttributes: {
+          class: 'text-blue-600 underline hover:text-blue-800 transition-colors',
         },
       }),
     ],
@@ -428,6 +515,22 @@ export default function App() {
     [editor],
   );
 
+  const handleSetLink = useCallback(
+    (url) => {
+      if (!editor) return;
+      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+    },
+    [editor],
+  );
+
+  const handleUnlink = useCallback(
+    () => {
+      if (!editor) return;
+      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+    },
+    [editor],
+  );
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
       <header className="sticky top-0 z-50 bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-3 shadow-sm">
@@ -440,7 +543,7 @@ export default function App() {
 
       <div className="sticky top-[48px] z-40 bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-3xl mx-auto px-4">
-          <Toolbar editor={editor} />
+          <Toolbar editor={editor} onOpenLinkModal={(href) => { setCurrentLinkUrl(href || ''); setLinkModalOpen(true); }} />
         </div>
       </div>
 
@@ -458,6 +561,14 @@ export default function App() {
         y={menuPos.y}
         onClose={() => setMenuVisible(false)}
         onAction={handleMenuAction}
+      />
+
+      <LinkModal
+        visible={linkModalOpen}
+        currentUrl={currentLinkUrl}
+        onClose={() => setLinkModalOpen(false)}
+        onSetLink={handleSetLink}
+        onUnlink={handleUnlink}
       />
     </div>
   );
