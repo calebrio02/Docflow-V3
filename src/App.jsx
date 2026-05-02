@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Table from '@tiptap/extension-table';
@@ -28,12 +29,7 @@ import {
   AlignCenter,
   AlignRight,
   Table as TableIcon,
-  Plus,
   Trash2,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
 } from 'lucide-react';
 
 const initialContent = `
@@ -96,6 +92,99 @@ const initialContent = `
 <p>Keep drafting — your changes are local only in this <em>Draft Mode</em>.</p>
 `;
 
+/* ─── Context Menu ─── */
+function TableContextMenu({ visible, x, y, onClose, onAction }) {
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    const handler = (e) => {
+      if (!e.target.closest('[data-table-menu]')) onClose();
+    };
+    const onEsc = (e) => { if (e.key === 'Escape') onClose(); };
+
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [visible, onClose]);
+
+  useEffect(() => {
+    if (!visible || !menuRef.current) return;
+
+    const el = menuRef.current;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const adjustedX = x + rect.width > vw ? x - (rect.width - (vw - x)) : x;
+    const adjustedY = y + rect.height > vh ? y - (rect.height - (vh - y)) : y;
+
+    el.style.left = `${Math.max(8, adjustedX)}px`;
+    el.style.top = `${Math.max(8, adjustedY)}px`;
+  }, [visible, x, y]);
+
+  if (!visible) return null;
+
+  const menuStyle = {
+    position: 'fixed',
+    top: `${y}px`,
+    left: `${x}px`,
+  };
+
+  const itemClass =
+    'w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-md transition-colors text-left';
+  const dangerClass =
+    'w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md transition-colors text-left';
+  const labelClass = 'px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400';
+
+  return (
+    <div
+      ref={menuRef}
+      data-table-menu
+      style={menuStyle}
+      className="fixed z-[100] min-w-[210px] bg-white rounded-xl shadow-xl border border-slate-200 py-1 animate-in"
+    >
+      <div className={labelClass}>Filas</div>
+      <button type="button" className={itemClass} onClick={() => onAction('rowAbove')}>
+        Insertar arriba
+      </button>
+      <button type="button" className={itemClass} onClick={() => onAction('rowBelow')}>
+        Insertar abajo
+      </button>
+      <button type="button" className={dangerClass} onClick={() => onAction('deleteRow')}>
+        <Trash2 size={14} />
+        Eliminar fila
+      </button>
+
+      <div className="my-1 border-t border-slate-100" />
+
+      <div className={labelClass}>Columnas</div>
+      <button type="button" className={itemClass} onClick={() => onAction('colLeft')}>
+        Insertar izquierda
+      </button>
+      <button type="button" className={itemClass} onClick={() => onAction('colRight')}>
+        Insertar derecha
+      </button>
+      <button type="button" className={dangerClass} onClick={() => onAction('deleteCol')}>
+        <Trash2 size={14} />
+        Eliminar columna
+      </button>
+
+      <div className="my-1 border-t border-slate-100" />
+
+      <button type="button" className={dangerClass} onClick={() => onAction('deleteTable')}>
+        <Trash2 size={14} />
+        Eliminar tabla
+      </button>
+    </div>
+  );
+}
+
+/* ─── Toolbar ─── */
 function Toolbar({ editor }) {
   if (!editor) return null;
 
@@ -109,8 +198,8 @@ function Toolbar({ editor }) {
     <button
       type="button"
       className={active ? activeClass : buttonClass}
+      onMouseDown={(e) => e.preventDefault()}
       onClick={() => pred()}
-      title={pred.name}
     >
       <Icon size={18} strokeWidth={2} />
     </button>
@@ -121,6 +210,7 @@ function Toolbar({ editor }) {
       <button
         type="button"
         className={buttonClass}
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => editor.chain().focus().undo().run()}
         disabled={!editor.can().undo()}
       >
@@ -129,6 +219,7 @@ function Toolbar({ editor }) {
       <button
         type="button"
         className={buttonClass}
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => editor.chain().focus().redo().run()}
         disabled={!editor.can().redo()}
       >
@@ -235,77 +326,15 @@ function Toolbar({ editor }) {
         pred={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
         icon={TableIcon}
       />
-      <Btn
-        pred={() => editor.chain().focus().insertTable({ rows: 3, cols: 4, withHeaderRow: false }).run()}
-        icon={Plus}
-      />
-
-      <div className={dividerClass} />
-
-      <button
-        type="button"
-        className={buttonClass}
-        onClick={() => editor.chain().focus().addColumnBefore().run()}
-        title="Add column before"
-      >
-        <ArrowLeft size={18} strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className={buttonClass}
-        onClick={() => editor.chain().focus().addColumnAfter().run()}
-        title="Add column after"
-      >
-        <ArrowRight size={18} strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className={buttonClass}
-        onClick={() => editor.chain().focus().addRowBefore().run()}
-        title="Add row before"
-      >
-        <ArrowUp size={18} strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className={buttonClass}
-        onClick={() => editor.chain().focus().addRowAfter().run()}
-        title="Add row after"
-      >
-        <ArrowDown size={18} strokeWidth={2} />
-      </button>
-
-      <div className={dividerClass} />
-
-      <button
-        type="button"
-        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"
-        onClick={() => editor.chain().focus().deleteColumn().run()}
-        title="Delete column"
-      >
-        <Trash2 size={18} strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"
-        onClick={() => editor.chain().focus().deleteRow().run()}
-        title="Delete row"
-      >
-        <Trash2 size={18} strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"
-        onClick={() => editor.chain().focus().deleteTable().run()}
-        title="Delete table"
-      >
-        <Trash2 size={18} strokeWidth={2} />
-      </button>
     </div>
   );
 }
 
+/* ─── App ─── */
 export default function App() {
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -351,8 +380,53 @@ export default function App() {
       attributes: {
         class: 'prose prose-slate max-w-none focus:outline-none min-h-[600px] px-2',
       },
+      handleDOMEvents: {
+        contextmenu: (_, event) => {
+          const target = event.target;
+          if (target.closest('table')) {
+            event.preventDefault();
+            setMenuPos({ x: event.clientX, y: event.clientY });
+            setMenuVisible(true);
+            return true;
+          }
+          return false;
+        },
+      },
     },
   });
+
+  const handleMenuAction = useCallback(
+    (action) => {
+      if (!editor) return;
+      const chain = editor.chain().focus();
+
+      switch (action) {
+        case 'rowAbove':
+          chain.addRowBefore().run();
+          break;
+        case 'rowBelow':
+          chain.addRowAfter().run();
+          break;
+        case 'deleteRow':
+          chain.deleteRow().run();
+          break;
+        case 'colLeft':
+          chain.addColumnBefore().run();
+          break;
+        case 'colRight':
+          chain.addColumnAfter().run();
+          break;
+        case 'deleteCol':
+          chain.deleteColumn().run();
+          break;
+        case 'deleteTable':
+          chain.deleteTable().run();
+          break;
+      }
+      setMenuVisible(false);
+    },
+    [editor],
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
@@ -377,6 +451,14 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      <TableContextMenu
+        visible={menuVisible}
+        x={menuPos.x}
+        y={menuPos.y}
+        onClose={() => setMenuVisible(false)}
+        onAction={handleMenuAction}
+      />
     </div>
   );
 }
