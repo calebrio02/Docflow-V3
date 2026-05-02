@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import Image from './extensions/imageResize';
 import Table from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
@@ -32,6 +33,7 @@ import {
   Table as TableIcon,
   Trash2,
   Link2,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 const initialContent = `
@@ -45,6 +47,7 @@ const initialContent = `
 <li><strong>Numbered lists</strong> — for ordered steps and rankings</li>
 <li><strong>Blockquotes</strong> — for citations and callouts</li>
 <li><strong>Tables</strong> — for structured data</li>
+<li><strong>Images</strong> — paste (Ctrl+V) or use the toolbar button. Drag the corner handle to resize.</li>
 <li><strong>Dividers</strong> — to separate sections</li>
 <li><strong>Todo Lists</strong> — for checkable items</li>
 </ul>
@@ -52,6 +55,7 @@ const initialContent = `
 <li data-type="taskItem" data-checked="false"><p>Build editor with TipTap</p></li>
 <li data-type="taskItem" data-checked="true"><p>Add tables and alignment</p></li>
 <li data-type="taskItem" data-checked="true"><p>Add todo lists</p></li>
+<li data-type="taskItem" data-checked="true"><p>Add images with resize</p></li>
 <li data-type="taskItem" data-checked="false"><p>Connect backend (Fase 2)</p></li>
 </ul>
 <blockquote>
@@ -256,7 +260,7 @@ function LinkModal({ visible, currentUrl, onClose, onSetLink, onUnlink }) {
 }
 
 /* ─── Toolbar ─── */
-function Toolbar({ editor, onOpenLinkModal }) {
+function Toolbar({ editor, onOpenLinkModal, onInsertImage }) {
   const currentLink = editor?.isActive('link') ? editor.getAttributes('link').href : null;
   if (!editor) return null;
 
@@ -406,6 +410,17 @@ function Toolbar({ editor, onOpenLinkModal }) {
         pred={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
         icon={TableIcon}
       />
+
+      <div className={dividerClass} />
+
+      <button
+        type="button"
+        className={buttonClass}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => onInsertImage()}
+      >
+        <ImageIcon size={18} strokeWidth={2} />
+      </button>
     </div>
   );
 }
@@ -416,6 +431,7 @@ export default function App() {
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [currentLinkUrl, setCurrentLinkUrl] = useState('');
+  const fileInputRef = useRef(null);
 
   const editor = useEditor({
     extensions: [
@@ -428,6 +444,13 @@ export default function App() {
         types: ['heading', 'paragraph'],
         alignments: ['left', 'center', 'right'],
         defaultAlignment: 'left',
+      }),
+      Image.configure({
+        inline: false,
+        HTMLAttributes: {
+          class: 'max-w-full rounded-lg',
+        },
+        allowBase64: true,
       }),
       Table.configure({
         resizable: true,
@@ -475,6 +498,38 @@ export default function App() {
             setMenuPos({ x: event.clientX, y: event.clientY });
             setMenuVisible(true);
             return true;
+          }
+          return false;
+        },
+       paste: (view, event) => {
+          const items = event.clipboardData?.items;
+          if (!items) return false;
+
+          for (const item of items) {
+            if (item.type.indexOf('image') !== -1) {
+              event.preventDefault();
+              const file = item.getAsFile();
+              if (!file) return true;
+
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                const result = e.target?.result;
+                if (result && typeof result === 'string') {
+                  const domImage = new window.Image();
+                  domImage.onload = () => {
+                    editor.commands.setImage({
+                      src: result,
+                      alt: file.name,
+                      title: file.name,
+                      width: domImage.naturalWidth,
+                    });
+                  };
+                  domImage.src = result;
+                }
+              };
+              reader.readAsDataURL(file);
+              return true;
+            }
           }
           return false;
         },
@@ -531,6 +586,37 @@ export default function App() {
     [editor],
   );
 
+  const handleInsertImage = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(
+    (e) => {
+      const file = e.target.files?.[0];
+      if (!file || !editor) return;
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const result = ev.target?.result;
+        if (result && typeof result === 'string') {
+          const domImage = new window.Image();
+          domImage.onload = () => {
+            editor.commands.setImage({
+              src: result,
+              alt: file.name,
+              title: file.name,
+              width: domImage.naturalWidth,
+            });
+          };
+          domImage.src = result;
+        }
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    },
+    [editor],
+  );
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
       <header className="sticky top-0 z-50 bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-3 shadow-sm">
@@ -543,7 +629,11 @@ export default function App() {
 
       <div className="sticky top-[48px] z-40 bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-3xl mx-auto px-4">
-          <Toolbar editor={editor} onOpenLinkModal={(href) => { setCurrentLinkUrl(href || ''); setLinkModalOpen(true); }} />
+          <Toolbar
+            editor={editor}
+            onOpenLinkModal={(href) => { setCurrentLinkUrl(href || ''); setLinkModalOpen(true); }}
+            onInsertImage={handleInsertImage}
+          />
         </div>
       </div>
 
@@ -569,6 +659,14 @@ export default function App() {
         onClose={() => setLinkModalOpen(false)}
         onSetLink={handleSetLink}
         onUnlink={handleUnlink}
+      />
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
       />
     </div>
   );
