@@ -36,6 +36,8 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 
+const STORAGE_KEY = 'docflow-draft-content';
+
 const initialContent = `
 <h1>Welcome to Docflow</h1>
 <p>This is a <strong>draft-mode</strong> editor powered by TipTap. Start writing your next idea here.</p>
@@ -489,6 +491,8 @@ export default function App() {
  const fileInputRef = useRef(null);
   const selectedImagePos = useRef(null);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [saveState, setSaveState] = useState(false);
+  const saveTimerRef = useRef(null);
 
   const editor = useEditor({
     extensions: [
@@ -542,7 +546,17 @@ export default function App() {
         },
       }),
     ],
-    content: initialContent,
+    content: localStorage.getItem(STORAGE_KEY) || initialContent,
+    onUpdate: ({ editor }) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+      saveTimerRef.current = setTimeout(() => {
+        localStorage.setItem(STORAGE_KEY, editor.getHTML());
+        setSaveState(true);
+        setTimeout(() => setSaveState(false), 2000);
+      }, 500);
+    },
     editorProps: {
       attributes: {
         class: 'prose prose-slate max-w-none focus:outline-none min-h-[600px] px-2',
@@ -615,6 +629,14 @@ export default function App() {
     dom.addEventListener('click', handleClick);
     return () => dom.removeEventListener('click', handleClick);
   }, [editor]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleMenuAction = useCallback(
     (action) => {
@@ -696,6 +718,18 @@ export default function App() {
     [editor],
   );
 
+  const handleClearDraft = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    setSaveState(false);
+    if (editor) {
+      editor.commands.setContent(initialContent);
+    }
+  }, [editor]);
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
       <header className="sticky top-0 z-50 bg-white border-b border-slate-200 px-6 py-3 flex items-center gap-3 shadow-sm">
@@ -704,6 +738,19 @@ export default function App() {
         <span className="ml-2 px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded-full">
           Draft Mode
         </span>
+        <button
+          type="button"
+          onClick={handleClearDraft}
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        >
+          <Trash2 size={14} />
+          Limpiar Borrador
+        </button>
+        {saveState && (
+          <span className="px-2.5 py-0.5 text-xs font-medium text-green-700 bg-green-100 rounded-full animate-in">
+            Guardado
+          </span>
+        )}
       </header>
 
       <div className="sticky top-[48px] z-40 bg-white border-b border-slate-200 shadow-sm">
