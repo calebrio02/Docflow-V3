@@ -369,7 +369,6 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage, selectedImagePos, sel
       <Btn
         pred={() => {
           const pos = selectedImagePos.current;
-          console.log('Button clicked, pos:', pos);
           if (pos !== null) {
             const { schema, doc } = editor.view.state;
             const node = doc.nodeAt(pos);
@@ -378,10 +377,8 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage, selectedImagePos, sel
               editor.view.dispatch(
                 editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
               );
-              console.log('Image aligned left');
             }
           } else {
-            console.log('No image selected, aligning text left');
             editor.chain().focus().setTextAlign('left').run();
           }
         }}
@@ -391,7 +388,6 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage, selectedImagePos, sel
       <Btn
         pred={() => {
           const pos = selectedImagePos.current;
-          console.log('Button clicked, pos:', pos);
           if (pos !== null) {
             const { schema, doc } = editor.view.state;
             const node = doc.nodeAt(pos);
@@ -400,10 +396,8 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage, selectedImagePos, sel
               editor.view.dispatch(
                 editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
               );
-              console.log('Image aligned center');
             }
           } else {
-            console.log('No image selected, aligning text center');
             editor.chain().focus().setTextAlign('center').run();
           }
         }}
@@ -413,7 +407,6 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage, selectedImagePos, sel
       <Btn
         pred={() => {
           const pos = selectedImagePos.current;
-          console.log('Button clicked, pos:', pos);
           if (pos !== null) {
             const { schema, doc } = editor.view.state;
             const node = doc.nodeAt(pos);
@@ -422,10 +415,8 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage, selectedImagePos, sel
               editor.view.dispatch(
                 editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
               );
-              console.log('Image aligned right');
             }
           } else {
-            console.log('No image selected, aligning text right');
             editor.chain().focus().setTextAlign('right').run();
           }
         }}
@@ -607,10 +598,8 @@ export default function App() {
     if (!editor) return;
     const dom = editor.view.dom;
     const handleClick = (e) => {
-      console.log('Editor clicked', e.target);
       const wrapper = e.target.closest('[data-image-pos]');
       if (!wrapper) {
-        console.log('No wrapper found');
         if (selectedImagePos.current !== null) {
           selectedImagePos.current = null;
           setSelectedImage(null);
@@ -618,7 +607,6 @@ export default function App() {
         return;
       }
       const pos = parseInt(wrapper.getAttribute('data-image-pos'), 10);
-      console.log('Wrapper found, pos:', pos);
       if (selectedImagePos.current !== pos) {
         selectedImagePos.current = pos;
         setSelectedImage(pos);
