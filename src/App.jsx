@@ -260,9 +260,22 @@ function LinkModal({ visible, currentUrl, onClose, onSetLink, onUnlink }) {
 }
 
 /* ─── Toolbar ─── */
-function Toolbar({ editor, onOpenLinkModal, onInsertImage }) {
+function Toolbar({ editor, onOpenLinkModal, onInsertImage, selectedImagePos, selectedImage }) {
   const currentLink = editor?.isActive('link') ? editor.getAttributes('link').href : null;
   if (!editor) return null;
+
+  const getSelectedImageAlign = () => {
+    if (selectedImage === null) return null;
+    try {
+      const node = editor.view.state.doc.nodeAt(selectedImage);
+      if (node && node.type.name === 'image') {
+        return node.attrs.align || null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
 
   const buttonClass =
     'inline-flex items-center justify-center w-9 h-9 rounded-lg text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors';
@@ -354,19 +367,70 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage }) {
       <div className={dividerClass} />
 
       <Btn
-        pred={() => editor.chain().focus().setTextAlign('left').run()}
+        pred={() => {
+          const pos = selectedImagePos.current;
+          console.log('Button clicked, pos:', pos);
+          if (pos !== null) {
+            const { schema, doc } = editor.view.state;
+            const node = doc.nodeAt(pos);
+            if (node) {
+              const newNode = schema.nodes.image.create({ ...node.attrs, align: 'left' });
+              editor.view.dispatch(
+                editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
+              );
+              console.log('Image aligned left');
+            }
+          } else {
+            console.log('No image selected, aligning text left');
+            editor.chain().focus().setTextAlign('left').run();
+          }
+        }}
         icon={AlignLeft}
-        active={editor.isActive({ textAlign: 'left' })}
+        active={getSelectedImageAlign() === 'left' || editor.isActive({ textAlign: 'left' })}
       />
       <Btn
-        pred={() => editor.chain().focus().setTextAlign('center').run()}
+        pred={() => {
+          const pos = selectedImagePos.current;
+          console.log('Button clicked, pos:', pos);
+          if (pos !== null) {
+            const { schema, doc } = editor.view.state;
+            const node = doc.nodeAt(pos);
+            if (node) {
+              const newNode = schema.nodes.image.create({ ...node.attrs, align: 'center' });
+              editor.view.dispatch(
+                editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
+              );
+              console.log('Image aligned center');
+            }
+          } else {
+            console.log('No image selected, aligning text center');
+            editor.chain().focus().setTextAlign('center').run();
+          }
+        }}
         icon={AlignCenter}
-        active={editor.isActive({ textAlign: 'center' })}
+        active={getSelectedImageAlign() === 'center' || editor.isActive({ textAlign: 'center' })}
       />
       <Btn
-        pred={() => editor.chain().focus().setTextAlign('right').run()}
+        pred={() => {
+          const pos = selectedImagePos.current;
+          console.log('Button clicked, pos:', pos);
+          if (pos !== null) {
+            const { schema, doc } = editor.view.state;
+            const node = doc.nodeAt(pos);
+            if (node) {
+              const newNode = schema.nodes.image.create({ ...node.attrs, align: 'right' });
+              editor.view.dispatch(
+                editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
+              );
+              console.log('Image aligned right');
+            }
+          } else {
+            console.log('No image selected, aligning text right');
+            editor.chain().focus().setTextAlign('right').run();
+          }
+        }}
         icon={AlignRight}
-        active={editor.isActive({ textAlign: 'right' })}
+        active={getSelectedImageAlign() === 'right' || editor.isActive({ textAlign: 'right' })}
       />
 
       <div className={dividerClass} />
@@ -431,7 +495,9 @@ export default function App() {
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [currentLinkUrl, setCurrentLinkUrl] = useState('');
-  const fileInputRef = useRef(null);
+ const fileInputRef = useRef(null);
+  const selectedImagePos = useRef(null);
+  const [selectedImage, setSelectedImage] = useState(null);
 
   const editor = useEditor({
     extensions: [
@@ -537,6 +603,31 @@ export default function App() {
     },
   });
 
+  useEffect(() => {
+    if (!editor) return;
+    const dom = editor.view.dom;
+    const handleClick = (e) => {
+      console.log('Editor clicked', e.target);
+      const wrapper = e.target.closest('[data-image-pos]');
+      if (!wrapper) {
+        console.log('No wrapper found');
+        if (selectedImagePos.current !== null) {
+          selectedImagePos.current = null;
+          setSelectedImage(null);
+        }
+        return;
+      }
+      const pos = parseInt(wrapper.getAttribute('data-image-pos'), 10);
+      console.log('Wrapper found, pos:', pos);
+      if (selectedImagePos.current !== pos) {
+        selectedImagePos.current = pos;
+        setSelectedImage(pos);
+      }
+    };
+    dom.addEventListener('click', handleClick);
+    return () => dom.removeEventListener('click', handleClick);
+  }, [editor]);
+
   const handleMenuAction = useCallback(
     (action) => {
       if (!editor) return;
@@ -633,6 +724,8 @@ export default function App() {
             editor={editor}
             onOpenLinkModal={(href) => { setCurrentLinkUrl(href || ''); setLinkModalOpen(true); }}
             onInsertImage={handleInsertImage}
+            selectedImagePos={selectedImagePos}
+            selectedImage={selectedImage}
           />
         </div>
       </div>

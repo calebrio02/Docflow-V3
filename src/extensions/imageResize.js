@@ -11,16 +11,60 @@ const ImageWithResize = Image.extend({
           return w ? parseInt(w, 10) : null;
         },
       },
+      align: {
+        default: null,
+        parseHTML: (element) => {
+          const align = element.getAttribute('data-align');
+          return align || null;
+        },
+        renderHTML: (attrs) => {
+          if (!attrs.align) return {};
+          return { 'data-align': attrs.align };
+        },
+      },
+    };
+  },
+
+  addCommands() {
+    const parent = this.parent?.();
+    return {
+      ...parent,
+      setImageAlign:
+        (align) =>
+        ({ commands }) => {
+          return commands.updateAttributes('image', { align });
+        },
     };
   },
 
   addNodeView() {
-    const { editor, node} = this;
+    const { editor, node } = this;
 
     return ({ node: currentNode, getPos }) => {
+      const pos = getPos();
       const wrapper = document.createElement('div');
-      wrapper.className = 'group relative inline-block';
       wrapper.contentEditable = 'false';
+      wrapper.setAttribute('data-image-pos', String(pos));
+
+      const applyAlign = (align, wrapperEl) => {
+        if (align) {
+          wrapperEl.setAttribute('data-align', align);
+        } else {
+          wrapperEl.removeAttribute('data-align');
+        }
+
+        // Use display:block so margin auto works for centering
+        if (align === 'center') {
+          wrapperEl.style.cssText = 'display: block; position: relative; width: fit-content; margin: 0 auto;';
+        } else if (align === 'right') {
+          wrapperEl.style.cssText = 'display: block; position: relative; width: fit-content; margin-left: auto; margin-right: 0;';
+        } else {
+          // left or default
+          wrapperEl.style.cssText = 'display: block; position: relative; width: fit-content; margin-right: auto; margin-left: 0;';
+        }
+      };
+
+      applyAlign(currentNode.attrs.align, wrapper);
 
       const img = document.createElement('img');
       img.src = currentNode.attrs.src;
@@ -50,7 +94,6 @@ const ImageWithResize = Image.extend({
         z-index: 10;
       `;
 
-      wrapper.style.cssText = 'display: inline-block; position: relative;';
       wrapper.addEventListener('mouseenter', () => {
         handle.style.opacity = '1';
       });
@@ -108,6 +151,7 @@ const ImageWithResize = Image.extend({
             alt: currentNode.attrs.alt,
             title: currentNode.attrs.title,
             width: finalWidth,
+            align: currentNode.attrs.align, // preserve alignment on resize
           });
 
           editor.view.dispatch(
@@ -136,6 +180,8 @@ const ImageWithResize = Image.extend({
             img.style.width = '';
           }
           img.style.height = 'auto';
+
+          applyAlign(updatedNode.attrs.align, wrapper);
           return true;
         },
 
