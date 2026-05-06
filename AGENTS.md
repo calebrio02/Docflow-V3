@@ -2,9 +2,9 @@
 
 ## Architecture
 
-- **Single-page React app.** The entire editor lives in `src/App.jsx` (~670 lines).
+- **Single-page React app.** The entire editor lives in `src/App.jsx` (~800 lines).
 - **Editor:** TipTap 2 (`useEditor` hook). No state management library, no router, no backend.
-- **Draft Mode only.** Content is hardcoded in `initialContent` and lives only in editor state. No persistence, no auth.
+- **Draft Mode with localStorage persistence.** Content is hardcoded in `initialContent` and auto-saved to localStorage every 500ms. No auth.
 
 ## Key files
 
@@ -31,7 +31,8 @@ docker-compose up --build   # Full stack, http://localhost:8090
 - **Toolbar buttons use `onMouseDown`** — not `onClick`. TipTap cancels focus on mousedown; the `onMouseDown={(e) => e.preventDefault()}` on each button preserves editor focus. Adding new buttons must follow this pattern.
 - **Image paste** is handled via `editorProps.handleDOMEvents.paste` — intercepts clipboard, reads images as base64, calls `editor.commands.setImage()`.
 - **Table context menu** fires on `contextmenu` DOM event when `target.closest('table')`. It's a fixed-position overlay with position-adjustment logic to avoid viewport overflow.
-- **`initialContent`** is a template string in `App.jsx:39`. Any content changes must update this.
+- **`initialContent`** is a template string in `App.jsx:41`. Any content changes must update this.
+- **localStorage persistence** — key is `docflow-draft-content`. Auto-saves every 500ms on editor update. Clear draft button resets to `initialContent`.
 - **TipTap extensions** are configured inline in `useEditor()` — adding/removing extensions means updating both the import and the `extensions` array in the same file.
 - **Nginx caching:** static assets (`js|css|png|jpg|...|woff2`) are served with `expires 1y` and `Cache-Control: public, immutable`.
 
