@@ -27,6 +27,8 @@ services:
       PORT: 4000
     ports:
       - "4000:4000"
+    volumes:
+      - uploads_data:/app/data/uploads
     restart: unless-stopped
 
   web:
@@ -38,7 +40,10 @@ services:
       - api
     ports:
       - "8090:80"
+    volumes:
+      - uploads_data:/data/uploads
     restart: unless-stopped
 
 volumes:
   db_data:
+  uploads_data:

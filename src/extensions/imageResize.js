@@ -38,9 +38,7 @@ const ImageWithResize = Image.extend({
   },
 
   addNodeView() {
-    const { editor, node } = this;
-
-    return ({ node: currentNode, getPos }) => {
+    return ({ node: currentNode, getPos, editor }) => {
       const pos = getPos();
       const wrapper = document.createElement('div');
       wrapper.contentEditable = 'false';

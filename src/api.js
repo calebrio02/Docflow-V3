@@ -80,6 +80,18 @@ export const api = {
 
   deleteDocument: (id) => request(`/documents/${id}`, { method: 'DELETE' }),
 
+  uploadFile: (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return request('/upload', {
+      method: 'POST',
+      headers: {},
+      body: formData,
+    });
+  },
+
+  deleteUpload: (filename) => request(`/uploads/${filename}`, { method: 'DELETE' }),
+
   importDocuments: (documents) =>
     request('/documents/import', {
       method: 'POST',

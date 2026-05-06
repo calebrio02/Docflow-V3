@@ -2,12 +2,43 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const sharp = require('sharp');
+const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+const UPLOAD_DIR = path.join(__dirname, 'data', 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+// Multer storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+const allowedImageExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'];
+const allowedVideoExts = ['.mp4', '.webm', '.mov', '.avi', '.mkv'];
+const allowedExts = [...allowedImageExts, ...allowedVideoExts];
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!allowedExts.includes(ext)) return cb(new Error(`Invalid file type. Allowed: ${allowedExts.join(', ')}`));
+    cb(null, true);
+  },
+});
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+app.use('/uploads', express.static(UPLOAD_DIR));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://docflow:docflow@localhost:5432/docflow',
@@ -288,6 +319,62 @@ app.post('/api/documents/import', authMiddleware, async (req, res) => {
     res.json(results);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/* ─── Upload ─── */
+app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const ext = path.extname(req.file.filename).toLowerCase();
+    const originalPath = req.file.path;
+    const mimeType = req.file.mimetype;
+    const isImage = allowedImageExts.includes(ext);
+    const isVideo = allowedVideoExts.includes(ext);
+
+    let finalPath = originalPath;
+    let urlPath = `/uploads/${req.file.filename}`;
+    let type = 'unknown';
+
+    if (isImage) {
+      const webpName = `${uuidv4()}.webp`;
+      const webpPath = path.join(UPLOAD_DIR, webpName);
+      const webpUrl = `/uploads/${webpName}`;
+      await sharp(originalPath)
+        .webp({ quality: 80 })
+        .toFile(webpPath);
+      fs.unlinkSync(originalPath);
+      finalPath = webpPath;
+      urlPath = webpUrl;
+      type = 'image';
+    } else if (isVideo) {
+      type = 'video';
+    }
+
+    res.json({
+      url: urlPath,
+      type: type,
+      mimeType: mimeType,
+      size: fs.statSync(finalPath).size,
+    });
+  } catch (err) {
+    console.error('Upload error:', err.message);
+    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
+app.delete('/api/uploads/:filename', authMiddleware, async (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(UPLOAD_DIR, filename);
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Delete failed' });
   }
 });
 
