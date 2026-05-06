@@ -2,42 +2,49 @@
 
 ## Architecture
 
-- **Single-page React app.** The entire editor lives in `src/App.jsx` (~800 lines).
-- **Editor:** TipTap 2 (`useEditor` hook). No state management library, no router, no backend.
-- **Draft Mode with localStorage persistence.** Content is hardcoded in `initialContent` and auto-saved to localStorage every 500ms. No auth.
-
-## Key files
-
-| File | What to know |
-|------|-------------|
-| `src/App.jsx` | Everything. Editor init, toolbar, context menu, link modal, image paste, file upload. Edit this first. |
-| `src/extensions/imageResize.js` | Custom TipTap extension — extends `@tiptap/extension-image` with a draggable resize handle via `addNodeView`. |
-| `src/index.css` | Prose/typography overrides for dark slate theme + task list checkbox styling. |
-| `vite.config.js` | Dev server runs on port **3000**, `host: true` (binds to all interfaces). |
-| `Dockerfile` | Multi-stage: `node:20-alpine` build → `nginx:alpine` serve. |
-| `docker-compose.yml` | Maps container port 80 → host **8090**. |
+- **Frontend:** React 19 + Vite 6 + TipTap 2. Everything in `src/App.jsx` (~1580 lines). All inline components — no separate component files.
+- **Backend:** Express 4 + PostgreSQL 16 in `server/server.js` (~400 lines). Auto-creates tables on startup.
+- **Auth:** Bearer token. Login → token saved to `localStorage('docflow-token')`. Server validates via `process.env.AUTH_TOKEN` (default: `docflow-production-token-7f8a9b2c`). Default creds: `admin` / `admin123`.
+- **Storage:** Documents persist to PostgreSQL via `PUT /api/documents/:id`. Drafts also saved to `localStorage('docflow-draft-content')` every 500ms (legacy).
+- **Files:** Images uploaded → converted to WebP via `sharp`. Videos stored as-is. Both served from `server/data/uploads` via `/uploads/`. Shared as Docker volume.
 
 ## Commands
 
 ```bash
-npm run dev          # Dev server, http://localhost:3000
-npm run build        # Output → dist/
-npm run preview      # Preview build locally
-docker-compose up --build   # Full stack, http://localhost:8090
+npm run dev              # Vite dev server → http://localhost:3000
+npm run dev:api          # Express API → http://localhost:4000
+npm run dev:all          # Both concurrently (requires `concurrently` in server/package.json)
+npm run build            # → dist/
+docker-compose up --build   # Full stack (db+api+web) → http://localhost:8090
+docker compose build --no-cache  # Rebuild after every frontend change (nginx caches assets)
 ```
 
 ## Gotchas
 
-- **Toolbar buttons use `onMouseDown`** — not `onClick`. TipTap cancels focus on mousedown; the `onMouseDown={(e) => e.preventDefault()}` on each button preserves editor focus. Adding new buttons must follow this pattern.
-- **Image paste** is handled via `editorProps.handleDOMEvents.paste` — intercepts clipboard, reads images as base64, calls `editor.commands.setImage()`.
-- **Table context menu** fires on `contextmenu` DOM event when `target.closest('table')`. It's a fixed-position overlay with position-adjustment logic to avoid viewport overflow.
-- **`initialContent`** is a template string in `App.jsx:41`. Any content changes must update this.
-- **localStorage persistence** — key is `docflow-draft-content`. Auto-saves every 500ms on editor update. Clear draft button resets to `initialContent`.
-- **TipTap extensions** are configured inline in `useEditor()` — adding/removing extensions means updating both the import and the `extensions` array in the same file.
-- **Nginx caching:** static assets (`js|css|png|jpg|...|woff2`) are served with `expires 1y` and `Cache-Control: public, immutable`.
+- **`editorRef` pattern required.** The TipTap `editor` instance is stored in `useRef` and synced via `useEffect` (`editorRef.current = editor`). Any callback that references `editor` (in `useCallback` deps or closures) **must** use `editorRef.current` instead. Direct `editor` references cause `Cannot access 'De' before initialization` in minified bundles.
+- **Toolbar buttons use `onMouseDown={(e) => e.preventDefault()} + onClick`.** TipTap steals focus on mousedown. Adding new buttons must follow this pattern exactly.
+- **Video extension** (`src/extensions/videoResize.js`) is a TipTap block-level node. Resize is handled externally via `MutationObserver` in App.jsx (not via `addNodeView` — that breaks node serialization). Videos are wrapped in a `<div>` with a circular handle; resize updates `width`/`height` attrs via `tr.setNodeMarkup()`.
+- **Image paste** intercepts via `editorProps.handleDOMEvents.paste`, reads images as base64, calls `processFile()` which uploads to backend and dispatches `editor.commands.setImage()`.
+- **Table context menu** fires on `contextmenu` DOM event when `target.closest('table')`. Fixed-position overlay with viewport-boundary correction.
+- **Nginx caching:** `expires 1y` + `Cache-Control: public, immutable` on static assets. Never skip `--no-cache` rebuild.
+- **`initialContent`** is a template string at `App.jsx:50`.
+- **`server/server.js`** runs `initDB()` synchronously before `app.listen()`. Creates tables and default admin user on every start.
+
+## Key files
+
+| File | Purpose |
+|------|---------|
+| `src/App.jsx` | Everything. Editor, auth, sidebar, modals, toolbar, video resize observer, paste handler. |
+| `src/extensions/videoResize.js` | TipTap `video` node — `insertVideo` command, `src`/`width`/`height` attrs. |
+| `src/extensions/imageResize.js` | Extends `@tiptap/extension-image` with `addNodeView` resize handle. |
+| `src/api.js` | Fetch client for `/api/*` endpoints. Attaches `Bearer` token. |
+| `server/server.js` | Express API: auth login, folders CRUD, documents CRUD, file upload (multer + sharp), export. |
+| `docker-compose.yml` | 3 services: `db` (pg), `api` (express), `web` (nginx). Shared `uploads_data` volume. |
+| `docker/nginx/default.conf` | Proxies `/api/` → `api:4000`, serves static from `/usr/share/nginx/html`, caches aggressively. |
+| `vite.config.js` | Dev server port **3000**, `host: true`. |
 
 ## Conventions
 
-- No lint/typecheck/test scripts defined in `package.json`. If adding them later, run manually before committing.
-- All components are defined inline in `App.jsx` (no separate files).
-- Tailwind utility classes throughout; no CSS modules.
+- No lint/typecheck/test scripts. Verify manually.
+- Tailwind utility classes throughout. No CSS modules.
+- Spanish UI strings (toolbar labels, context menu, modals).

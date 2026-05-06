@@ -1,7 +1,45 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: docflow-db
+    environment:
+      POSTGRES_USER: docflow
+      POSTGRES_PASSWORD: docflow
+      POSTGRES_DB: docflow
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build: ./server
+    container_name: docflow-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://docflow:docflow@db:5432/docflow
+      AUTH_TOKEN: ${AUTH_TOKEN:-docflow-production-token-7f8a9b2c}
+      PORT: 4000
+    volumes:
+      - uploads_data:/app/data/uploads
+    restart: unless-stopped
+
   web:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: docflow-web
+    depends_on:
+      - api
+    volumes:
+      - uploads_data:/data/uploads
     restart: unless-stopped
+
+volumes:
+  db_data:
+  uploads_data:
