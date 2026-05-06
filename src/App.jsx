@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from './extensions/imageResize';
+import VideoExtension from './extensions/videoResize';
 import Table from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
@@ -1114,7 +1115,7 @@ export default function App() {
       if (result.type === 'image') {
         editor.commands.setImage({ src: result.url, alt: file.name, title: file.name });
       } else if (result.type === 'video') {
-        editor.commands.insertContent(`<video src="${result.url}" controls></video>`);
+        editor.commands.insertVideo({ src: result.url });
       }
     } catch (err) {
       console.error('Failed to upload file:', err);
@@ -1161,6 +1162,7 @@ export default function App() {
         },
         allowBase64: true,
       }),
+      VideoExtension,
       Table.configure({
         resizable: true,
         lastColumnResizable: true,
@@ -1279,6 +1281,135 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!editor) return;
+    const dom = editor.view.dom;
+
+    const addVideoResize = (video) => {
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'relative';
+      wrapper.style.display = 'block';
+      wrapper.style.maxWidth = '100%';
+      wrapper.style.margin = '8px 0';
+
+      const currentWidth = parseInt(video.style.width, 10) || video.getAttribute('width') || 640;
+      const currentHeight = parseInt(video.style.height, 10) || video.getAttribute('height') || 360;
+      video.style.width = `${currentWidth}px`;
+      video.style.height = `${currentHeight}px`;
+      video.style.maxWidth = '100%';
+      video.style.borderRadius = '8px';
+
+      const handle = document.createElement('div');
+      handle.style.cssText = `
+        position: absolute;
+        bottom: -4px;
+        right: -4px;
+        width: 16px;
+        height: 16px;
+        background: #fff;
+        border: 2px solid #3b82f6;
+        border-radius: 50%;
+        cursor: se-resize;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        opacity: 0;
+        transition: opacity 0.15s;
+        z-index: 10;
+        pointer-events: auto;
+      `;
+
+      wrapper.appendChild(video);
+      wrapper.appendChild(handle);
+      video.parentNode?.insertBefore(wrapper, video);
+
+      let isResizing = false;
+      let startX = 0;
+      let startW = currentWidth;
+      let startH = currentHeight;
+      let destroyed = false;
+
+      const onMouseDown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isResizing = true;
+        startX = e.clientX;
+        startW = currentWidth;
+        startH = currentHeight;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'se-resize';
+      };
+
+      const onMouseMove = (e) => {
+        if (!isResizing || destroyed) return;
+        e.preventDefault();
+        const dx = e.clientX - startX;
+        const dy = e.clientY - (startX + startW);
+        const delta = Math.max(dx, dy);
+        const newWidth = Math.max(200, startW + delta);
+        const ratio = startW / startH;
+        const newHeight = Math.max(112, newWidth / ratio);
+        video.style.width = `${newWidth}px`;
+        video.style.height = `${newHeight}px`;
+      };
+
+      const onMouseUp = (e) => {
+        if (!isResizing || destroyed) return;
+        isResizing = false;
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        const newWidth = parseInt(video.style.width, 10);
+        const newHeight = parseInt(video.style.height, 10);
+        const pos = editor.view.posAtDOM(video, 0);
+        if (pos != null) {
+          editor.view.dispatch(editor.view.state.tr.setNodeMarkup(pos, undefined, {
+            ...video.attributes,
+            width: newWidth,
+            height: newHeight,
+          }));
+        }
+      };
+
+      handle.addEventListener('mousedown', onMouseDown);
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+
+      const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const node of m.addedNodes) {
+            if (node instanceof HTMLElement && node.tagName === 'VIDEO') {
+              addVideoResize(node);
+            }
+            if (node instanceof HTMLElement) {
+              node.querySelectorAll?.('video').forEach(addVideoResize);
+            }
+          }
+        }
+      });
+
+      observer.observe(dom, { childList: true, subtree: true });
+
+      return () => {
+        destroyed = true;
+        handle.removeEventListener('mousedown', onMouseDown);
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        observer.disconnect();
+        wrapper.replaceWith(video);
+      };
+    };
+
+    const videos = dom.querySelectorAll('video');
+    videos.forEach(addVideoResize);
+
+    return () => {
+      dom.querySelectorAll('[style*="position: relative"]').forEach((el) => {
+        if (el.querySelector?.('video')) {
+          const video = el.querySelector('video');
+          el.replaceWith(video);
+        }
+      });
+    };
+  }, [editor]);
 
   const handleMenuAction = useCallback(
     (action) => {
