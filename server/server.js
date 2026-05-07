@@ -28,7 +28,7 @@ const allowedExts = [...allowedImageExts, ...allowedVideoExts];
 
 const upload = multer({
   storage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (!allowedExts.includes(ext)) return cb(new Error(`Invalid file type. Allowed: ${allowedExts.join(', ')}`));
@@ -44,183 +44,612 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://docflow:docflow@localhost:5432/docflow',
 });
 
-async function initDB() {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+// ─── Migration helper ───
+async function runMigrations(client) {
+  // Enable uuid and pgcrypto if needed
+  try { await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto'); } catch (err) { console.error('Migration error:', err); }
+  try { await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'); } catch (err) { console.error('Migration error:', err); }
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(255) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
+  // users - preserve, add email if missing
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(255) UNIQUE NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email') THEN
+        ALTER TABLE users ADD COLUMN email VARCHAR(255);
+      END IF;
+    END $$;
+  `);
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS folders (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        name VARCHAR(255) NOT NULL,
-        parent_folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
+  // projects
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      created_by INTEGER REFERENCES users(id)
+    )
+  `);
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS documents (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
-        name VARCHAR(255) NOT NULL,
-        content TEXT DEFAULT '',
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
+  // project_members
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS project_members (
+      id SERIAL PRIMARY KEY,
+      project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      role VARCHAR(50) NOT NULL DEFAULT 'viewer',
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(project_id, user_id)
+    )
+  `);
 
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id);
-      CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_folder_id);
-      CREATE INDEX IF NOT EXISTS idx_docs_user_id ON documents(user_id);
-      CREATE INDEX IF NOT EXISTS idx_docs_folder_id ON documents(folder_id);
-    `);
+  // folders (subcarpetas dentro de proyectos)
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS folders (
+      id SERIAL PRIMARY KEY,
+      project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+      parent_folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
 
-    const adminExists = await client.query('SELECT 1 FROM users WHERE username = $1', ['admin']);
-    if (adminExists.rows.length === 0) {
-      const hash = await bcrypt.hash('admin123', 10);
-      await client.query('INSERT INTO users (username, password_hash) VALUES ($1, $2)', ['admin', hash]);
-    }
+  // documents
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS documents (
+      id SERIAL PRIMARY KEY,
+      project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+      folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+      title VARCHAR(500) NOT NULL DEFAULT 'Untitled',
+      content JSONB DEFAULT '[]',
+      published_content JSONB,
+      is_public BOOLEAN DEFAULT false,
+      public_token UUID UNIQUE DEFAULT gen_random_uuid(),
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      created_by INTEGER REFERENCES users(id),
+      updated_by INTEGER REFERENCES users(id)
+    )
+  `);
 
-    await client.query('COMMIT');
-    console.log('Database initialized successfully');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('DB init error:', err);
-    process.exit(1);
-  } finally {
-    client.release();
-  }
+  // releases (commits públicos)
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS releases (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+      content JSONB NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      description TEXT,
+      version_number INTEGER NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      created_by INTEGER REFERENCES users(id)
+    )
+  `);
+
+  // invitations
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS invitations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email VARCHAR(255) NOT NULL,
+      project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+      role VARCHAR(50) NOT NULL DEFAULT 'editor',
+      token VARCHAR(255) UNIQUE NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      used_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW(),
+      created_by INTEGER REFERENCES users(id)
+    )
+  `);
+
+  // indices
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_project_members_project ON project_members(project_id)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_folders_project ON folders(project_id)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_folder_id)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_docs_project ON documents(project_id)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_docs_folder ON documents(folder_id)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_releases_doc ON releases(document_id)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token)`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email)`);
 }
 
+async function initDB() {
+  await runMigrations(pool);
+
+  // Default admin if no users exist
+  const adminExists = await pool.query('SELECT 1 FROM users WHERE username = $1', ['admin']);
+  if (adminExists.rows.length === 0) {
+    const hash = await bcrypt.hash('admin123', 10);
+    await pool.query('INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3)', ['admin', 'admin@docflow.local', hash]);
+  }
+
+  console.log('Database initialized successfully');
+}
+
+// ─── Auth helpers ───
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'No token' });
-
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
-  if (!token || token !== process.env.AUTH_TOKEN) {
+  
+  // Basic token validation (should be replaced with JWT in the future)
+  const expectedToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
+  if (!token || token !== expectedToken) {
     return res.status(401).json({ error: 'Invalid token' });
   }
-  req.userId = 1;
+
+  const userIdHeader = req.headers['x-user-id'];
+  if (!userIdHeader) {
+    return res.status(401).json({ error: 'X-User-Id header required' });
+  }
+
+  req.userId = parseInt(userIdHeader);
+  req.username = req.headers['x-username'] || 'unknown';
   next();
 }
 
-/* ─── Auth ─── */
+async function requireRole(userId, projectId, role) {
+  const result = await pool.query(
+    `SELECT role FROM project_members WHERE user_id = $1 AND project_id = $2`,
+    [userId, projectId]
+  );
+  if (result.rows.length === 0) return null;
+  const memberRole = result.rows[0].role;
+  const roleRank = { owner: 3, editor: 2, viewer: 1 };
+  if (roleRank[memberRole] >= roleRank[role]) return memberRole;
+  return null;
+}
+
+// ─── Auth ───
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
-    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    const result = await pool.query('SELECT * FROM users WHERE username = $1 OR email = $1', [username]);
     if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
-
     const user = result.rows[0];
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(401).json({ error: 'Invalid credentials' });
 
     const authToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
-    res.json({ token: authToken, userId: user.id, username: user.username });
+    res.json({
+      token: authToken,
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+    });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-/* ─── Folders ─── */
-app.get('/api/folders', authMiddleware, async (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
+  const { username, email, password, invitationToken } = req.body;
+  try {
+    if (invitationToken) {
+      const invite = await pool.query(
+        `SELECT * FROM invitations WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()`,
+        [invitationToken]
+      );
+      if (invite.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired invitation' });
+
+      const inv = invite.rows[0];
+      const exists = await pool.query('SELECT 1 FROM users WHERE email = $1', [inv.email]);
+      if (exists.rows.length > 0) return res.status(400).json({ error: 'User already registered with this email' });
+
+      const hash = await bcrypt.hash(password, 10);
+      const result = await pool.query(
+        `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email, created_at`,
+        [username, inv.email, hash]
+      );
+      const user = result.rows[0];
+
+      await pool.query(
+        `UPDATE invitations SET used_at = NOW() WHERE token = $1`,
+        [invitationToken]
+      );
+
+      const authToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
+      await pool.query(
+        `INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3)`,
+        [inv.project_id, user.id, inv.role]
+      );
+
+      res.status(201).json({
+        token: authToken,
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+      });
+    } else {
+      const hash = await bcrypt.hash(password, 10);
+      const result = await pool.query(
+        `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email, created_at`,
+        [username, email, hash]
+      );
+      const user = result.rows[0];
+      const authToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
+      res.status(201).json({
+        token: authToken,
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+      });
+    }
+  } catch (err) {
+    if (err.code === '23505') return res.status(400).json({ error: 'Username already exists' });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, username, email, created_at FROM users WHERE id = $1', [req.userId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    const user = result.rows[0];
+
+    const projectsResult = await pool.query(
+      `SELECT pm.project_id, pm.role, p.name FROM project_members pm
+       JOIN projects p ON pm.project_id = p.id
+       WHERE pm.user_id = $1 ORDER BY p.name`,
+      [req.userId]
+    );
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      projects: projectsResult.rows,
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Invitations ───
+app.post('/api/invitations', authMiddleware, async (req, res) => {
+  const { email, projectId, role } = req.body;
+  if (!email || !projectId) return res.status(400).json({ error: 'Email and project required' });
+
+  const memberRole = role || 'editor';
+  try {
+    const hasAccess = await pool.query(
+      `SELECT role FROM project_members WHERE user_id = $1 AND project_id = $2`,
+      [req.userId, projectId]
+    );
+    if (hasAccess.rows.length === 0 || hasAccess.rows[0].role !== 'owner') {
+      return res.status(403).json({ error: 'Only project owners can invite members' });
+    }
+
+    const token = uuidv4();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const result = await pool.query(
+      `INSERT INTO invitations (email, project_id, role, token, expires_at, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [email, projectId, memberRole, token, expiresAt, req.userId]
+    );
+
+    res.status(201).json({ ...result.rows[0], invitationLink: `/invite/${token}` });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/invitations/accept', async (req, res) => {
+  const { token, username, email, password } = req.body;
+  try {
+    const invite = await pool.query(
+      `SELECT * FROM invitations WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()`,
+      [token]
+    );
+    if (invite.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired invitation' });
+
+    const inv = invite.rows[0];
+    const hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email, created_at`,
+      [username, email, hash]
+    );
+    const user = result.rows[0];
+
+    await pool.query(
+      `UPDATE invitations SET used_at = NOW() WHERE token = $1`,
+      [token]
+    );
+
+    await pool.query(
+      `INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3)`,
+      [inv.project_id, user.id, inv.role]
+    );
+
+    const authToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
+    res.status(201).json({
+      token: authToken,
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+    });
+  } catch (err) {
+    if (err.code === '23505') return res.status(400).json({ error: 'Username already exists' });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Projects ───
+app.get('/api/projects', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM folders WHERE user_id = $1 ORDER BY created_at DESC',
+      `SELECT p.*, pm.role FROM projects p
+       JOIN project_members pm ON p.id = pm.project_id
+       WHERE pm.user_id = $1 ORDER BY p.name`,
       [req.userId]
     );
     res.json(result.rows);
   } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/projects', authMiddleware, async (req, res) => {
+  const { name, description } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name required' });
+  try {
+    const projectId = uuidv4();
+    await pool.query(
+      `INSERT INTO projects (id, name, description, created_by) VALUES ($1, $2, $3, $4)`,
+      [projectId, name, description || null, req.userId]
+    );
+    await pool.query(
+      `INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3)`,
+      [projectId, req.userId, 'owner']
+    );
+    const result = await pool.query(
+      `SELECT p.*, pm.role FROM projects p JOIN project_members pm ON p.id = pm.project_id WHERE p.id = $1 AND pm.user_id = $2`,
+      [projectId, req.userId]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/projects/:id', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT p.*, pm.role FROM projects p JOIN project_members pm ON p.id = pm.project_id
+       WHERE p.id = $1 AND pm.user_id = $2`,
+      [req.params.id, req.userId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Project not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/projects/:id', authMiddleware, async (req, res) => {
+  try {
+    const canDelete = await requireRole(req.userId, req.params.id, 'owner');
+    if (!canDelete) return res.status(403).json({ error: 'Only owners can delete projects' });
+    await pool.query('DELETE FROM projects WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/projects/:id', authMiddleware, async (req, res) => {
+  const { name, description } = req.body;
+  try {
+    const canEdit = await requireRole(req.userId, req.params.id, 'owner');
+    if (!canEdit) return res.status(403).json({ error: 'Only owners can edit projects' });
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (name !== undefined) { fields.push(`name = $${idx++}`); values.push(name); }
+    if (description !== undefined) { fields.push(`description = $${idx++}`); values.push(description); }
+    fields.push(`updated_at = NOW()`);
+    values.push(req.params.id);
+    await pool.query(`UPDATE projects SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+    const result = await pool.query(
+      `SELECT p.*, pm.role FROM projects p JOIN project_members pm ON p.id = pm.project_id WHERE p.id = $1 AND pm.user_id = $2`,
+      [req.params.id, req.userId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Project Members ───
+app.get('/api/projects/:id/members', authMiddleware, async (req, res) => {
+  try {
+    const canView = await requireRole(req.userId, req.params.id, 'viewer');
+    if (!canView) return res.status(403).json({ error: 'Access denied' });
+    const result = await pool.query(
+      `SELECT u.id, u.username, u.email, pm.role, u.created_at
+       FROM project_members pm
+       JOIN users u ON pm.user_id = u.id
+       WHERE pm.project_id = $1
+       ORDER BY u.username`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/projects/:id/members', authMiddleware, async (req, res) => {
+  const { userId, role } = req.body;
+  if (!userId || !role) return res.status(400).json({ error: 'userId and role required' });
+  try {
+    const canManage = await requireRole(req.userId, req.params.id, 'owner');
+    if (!canManage) return res.status(403).json({ error: 'Only owners can manage members' });
+
+    const exists = await pool.query(
+      `SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2`,
+      [req.params.id, userId]
+    );
+    if (exists.rows.length > 0) return res.status(400).json({ error: 'User already a member' });
+
+    await pool.query(
+      `INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3)`,
+      [req.params.id, userId, role]
+    );
+    res.status(201).json({ success: true });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/projects/:id/members/:userId', authMiddleware, async (req, res) => {
+  try {
+    const canManage = await requireRole(req.userId, req.params.id, 'owner');
+    if (!canManage) return res.status(403).json({ error: 'Only owners can manage members' });
+    if (parseInt(req.params.userId) === req.userId) return res.status(400).json({ error: 'Cannot remove yourself' });
+    await pool.query(
+      `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2`,
+      [req.params.id, req.params.userId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/projects/:id/members/:userId', authMiddleware, async (req, res) => {
+  const { role } = req.body;
+  if (!role) return res.status(400).json({ error: 'Role required' });
+  try {
+    const canManage = await requireRole(req.userId, req.params.id, 'owner');
+    if (!canManage) return res.status(403).json({ error: 'Only owners can manage members' });
+    await pool.query(
+      `UPDATE project_members SET role = $1 WHERE project_id = $2 AND user_id = $3`,
+      [role, req.params.id, req.params.userId]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Folders (subcarpetas) ───
+app.get('/api/projects/:id/folders', authMiddleware, async (req, res) => {
+  try {
+    const canView = await requireRole(req.userId, req.params.id, 'viewer');
+    if (!canView) return res.status(403).json({ error: 'Access denied' });
+    const result = await pool.query(
+      `SELECT * FROM folders WHERE project_id = $1 AND parent_folder_id IS NULL ORDER BY name`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/folders/:id/subfolders', authMiddleware, async (req, res) => {
+  try {
+    const parent = await pool.query('SELECT project_id FROM folders WHERE id = $1', [req.params.id]);
+    if (parent.rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
+    const canView = await requireRole(req.userId, parent.rows[0].project_id, 'viewer');
+    if (!canView) return res.status(403).json({ error: 'Access denied' });
+    const result = await pool.query(
+      `SELECT * FROM folders WHERE parent_folder_id = $1 ORDER BY name`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 app.post('/api/folders', authMiddleware, async (req, res) => {
-  const { name, parentFolderId } = req.body;
-  if (!name) return res.status(400).json({ error: 'Name required' });
+  const { name, projectId, parentFolderId } = req.body;
+  if (!name || !projectId) return res.status(400).json({ error: 'Name and projectId required' });
   try {
+    const canEdit = await requireRole(req.userId, projectId, 'editor');
+    if (!canEdit) return res.status(403).json({ error: 'Access denied' });
     const result = await pool.query(
-      `INSERT INTO folders (user_id, name, parent_folder_id) VALUES ($1, $2, $3) RETURNING *`,
-      [req.userId, name, parentFolderId || null]
+      `INSERT INTO folders (project_id, name, parent_folder_id) VALUES ($1, $2, $3) RETURNING *`,
+      [projectId, name, parentFolderId || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-app.put('/api/folders/:id', authMiddleware, async (req, res) => {
-  const { name, parentFolderId } = req.body;
-  const fields = [];
-  const values = [];
-  let idx = 1;
-  if (name !== undefined && name !== null && name !== '') {
-    fields.push(`name = $${idx++}`);
-    values.push(name);
-  }
-  if (parentFolderId !== undefined) {
-    fields.push(`parent_folder_id = $${idx++}`);
-    values.push(parentFolderId === '' ? null : parentFolderId);
-  }
-  fields.push('updated_at = NOW()');
-  values.push(req.params.id, req.userId);
-  try {
-    const result = await pool.query(
-      `UPDATE folders SET ${fields.join(', ')} WHERE id = $${idx} AND user_id = $${idx + 1} RETURNING *`,
-      values
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error('PUT folder error:', err.message);
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 app.delete('/api/folders/:id', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      'DELETE FROM folders WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Folder not found' });
+    const folder = await pool.query('SELECT project_id FROM folders WHERE id = $1', [req.params.id]);
+    if (folder.rows.length === 0) return res.status(404).json({ error: 'Folder not found' });
+    const canEdit = await requireRole(req.userId, folder.rows[0].project_id, 'editor');
+    if (!canEdit) return res.status(403).json({ error: 'Access denied' });
+    await pool.query('DELETE FROM folders WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-/* ─── Documents ─── */
-app.get('/api/documents', authMiddleware, async (req, res) => {
-  const { folderId } = req.query;
+// ─── Documents ───
+app.get('/api/projects/:id/documents', authMiddleware, async (req, res) => {
   try {
+    const canView = await requireRole(req.userId, req.params.id, 'viewer');
+    if (!canView) return res.status(403).json({ error: 'Access denied' });
+    const { folderId } = req.query;
     let result;
     if (folderId) {
       result = await pool.query(
-        'SELECT * FROM documents WHERE user_id = $1 AND folder_id = $2 ORDER BY created_at DESC',
-        [req.userId, folderId]
+        `SELECT id, project_id, folder_id, title, is_public, public_token, created_at, updated_at,
+                created_by, updated_by,
+                (SELECT username FROM users WHERE id = d.created_by) as author_name
+         FROM documents d
+         WHERE project_id = $1 AND folder_id = $2
+         ORDER BY created_at DESC`,
+        [req.params.id, folderId]
       );
     } else {
       result = await pool.query(
-        'SELECT * FROM documents WHERE user_id = $1 ORDER BY created_at DESC',
-        [req.userId]
+        `SELECT id, project_id, folder_id, title, is_public, public_token, created_at, updated_at,
+                created_by, updated_by,
+                (SELECT username FROM users WHERE id = d.created_by) as author_name
+         FROM documents d
+         WHERE project_id = $1 AND folder_id IS NULL
+         ORDER BY created_at DESC`,
+        [req.params.id]
       );
     }
     res.json(result.rows);
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -228,57 +657,71 @@ app.get('/api/documents', authMiddleware, async (req, res) => {
 app.get('/api/documents/:id', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM documents WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
+      `SELECT d.*, u.username as author_name FROM documents d
+       LEFT JOIN users u ON d.created_by = u.id
+       WHERE d.id = $1`,
+      [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
-    res.json(result.rows[0]);
+    const doc = result.rows[0];
+
+    const hasAccess = await requireRole(req.userId, doc.project_id, 'viewer');
+    if (!hasAccess) return res.status(403).json({ error: 'Access denied' });
+
+    res.json({
+      id: doc.id,
+      project_id: doc.project_id,
+      folder_id: doc.folder_id,
+      title: doc.title,
+      content: doc.content || [],
+      created_at: doc.created_at,
+      updated_at: doc.updated_at,
+      author_name: doc.author_name,
+    });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 app.post('/api/documents', authMiddleware, async (req, res) => {
-  const { name, folderId, content } = req.body;
-  if (!name) return res.status(400).json({ error: 'Name required' });
+  const { title, projectId, folderId, content } = req.body;
+  if (!title || !projectId) return res.status(400).json({ error: 'Title and projectId required' });
   try {
+    const canEdit = await requireRole(req.userId, projectId, 'editor');
+    if (!canEdit) return res.status(403).json({ error: 'Access denied' });
     const result = await pool.query(
-      `INSERT INTO documents (user_id, folder_id, name, content)
-       VALUES ($1, $2, $3, COALESCE($4, ''))
-       RETURNING *`,
-      [req.userId, folderId || null, name, content || '']
+      `INSERT INTO documents (project_id, folder_id, title, content, created_by, updated_by)
+       VALUES ($1, $2, $3, COALESCE($4::jsonb, '[]'::jsonb), $5, $5) RETURNING *`,
+      [projectId, folderId || null, title, JSON.stringify(content || []), req.userId]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 app.put('/api/documents/:id', authMiddleware, async (req, res) => {
-  const { name, content, folderId } = req.body;
+  const { title, content, folderId } = req.body;
   const fields = [];
-  const values = [];
+  const params = [];
   let idx = 1;
-  if (name !== undefined && name !== null && name !== '') {
-    fields.push(`name = $${idx++}`);
-    values.push(name);
-  }
-  if (content !== undefined) {
-    fields.push(`content = $${idx++}`);
-    values.push(content === '' ? '' : content);
-  }
-  if (folderId !== undefined) {
-    fields.push(`folder_id = $${idx++}`);
-    values.push(folderId === '' ? null : folderId);
-  }
-  fields.push('updated_at = NOW()');
-  values.push(req.params.id, req.userId);
+  if (title !== undefined && title !== '') { fields.push(`title = $${idx}`); params.push(title); idx++; }
+  if (content !== undefined) { fields.push(`content = $${idx}`); params.push(JSON.stringify(content)); idx++; }
+  if (folderId !== undefined) { fields.push(`folder_id = $${idx}`); params.push(folderId === '' ? null : folderId); idx++; }
+  fields.push(`updated_at = NOW(), updated_by = $${idx}`); params.push(req.userId); idx++;
+  params.push(req.params.id);
+
   try {
     const result = await pool.query(
-      `UPDATE documents SET ${fields.join(', ')} WHERE id = $${idx} AND user_id = $${idx + 1} RETURNING *`,
-      values
+      `UPDATE documents SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+      params
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    if (result.rows.length === 0) {
+      const check = await pool.query('SELECT id FROM documents WHERE id = $1', [req.params.id]);
+      if (check.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    }
     res.json(result.rows[0]);
   } catch (err) {
     console.error('PUT document error:', err.message);
@@ -288,41 +731,208 @@ app.put('/api/documents/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/documents/:id', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      'DELETE FROM documents WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Document not found' });
+    const doc = await pool.query('SELECT project_id FROM documents WHERE id = $1', [req.params.id]);
+    if (doc.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    const canEdit = await requireRole(req.userId, doc.rows[0].project_id, 'editor');
+    if (!canEdit) return res.status(403).json({ error: 'Access denied' });
+    await pool.query('DELETE FROM documents WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-app.post('/api/documents/import', authMiddleware, async (req, res) => {
-  const { documents } = req.body;
-  if (!Array.isArray(documents) || documents.length === 0) {
-    return res.status(400).json({ error: 'Documents array required' });
-  }
+app.post('/api/documents/:id/copy', authMiddleware, async (req, res) => {
   try {
-    const results = [];
-    for (const doc of documents) {
-      const result = await pool.query(
-        `INSERT INTO documents (user_id, folder_id, name, content)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT DO NOTHING
-         RETURNING *`,
-        [req.userId, doc.folderId || null, doc.name, doc.content || '']
-      );
-      if (result.rows[0]) results.push(result.rows[0]);
-    }
-    res.json(results);
+    const canEdit = await requireRole(req.userId, req.body.projectId || 'none', 'editor');
+    if (!canEdit) return res.status(403).json({ error: 'Access denied' });
+    const src = await pool.query('SELECT * FROM documents WHERE id = $1', [req.params.id]);
+    if (src.rows.length === 0) return res.status(404).json({ error: 'Source not found' });
+    const s = src.rows[0];
+    const result = await pool.query(
+      `INSERT INTO documents (project_id, folder_id, title, content, created_by, updated_by)
+       VALUES ($1, $2, $3 || ' (copy)', $4, $5, $5) RETURNING *`,
+      [s.project_id, s.folder_id, s.title, s.content, req.userId]
+    );
+    res.status(201).json(result.rows[0]);
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-/* ─── Upload ─── */
+app.patch('/api/documents/:id', authMiddleware, async (req, res) => {
+  const { folderId } = req.body;
+  try {
+    const doc = await pool.query('SELECT project_id FROM documents WHERE id = $1', [req.params.id]);
+    if (doc.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    const canEdit = await requireRole(req.userId, doc.rows[0].project_id, 'editor');
+    if (!canEdit) return res.status(403).json({ error: 'Access denied' });
+    const result = await pool.query(
+      `UPDATE documents SET folder_id = $1, updated_at = NOW(), updated_by = $2 WHERE id = $3 RETURNING *`,
+      [folderId === '' ? null : folderId, req.userId, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.patch('/api/documents/:id/share', authMiddleware, async (req, res) => {
+  const { isPublic } = req.body;
+  try {
+    const doc = await pool.query('SELECT project_id FROM documents WHERE id = $1', [req.params.id]);
+    if (doc.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    const canShare = await requireRole(req.userId, doc.rows[0].project_id, 'owner');
+    if (!canShare) return res.status(403).json({ error: 'Only owners can share documents' });
+    const result = await pool.query(
+      `UPDATE documents SET is_public = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [isPublic, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Releases ───
+app.post('/api/documents/:id/releases', authMiddleware, async (req, res) => {
+  const { title, description } = req.body;
+  if (!title) return res.status(400).json({ error: 'Release title required' });
+  try {
+    const doc = await pool.query(
+      `SELECT content, project_id FROM documents WHERE id = $1`,
+      [req.params.id]
+    );
+    if (doc.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+
+    const canCommit = await requireRole(req.userId, doc.rows[0].project_id, 'editor');
+    if (!canCommit) return res.status(403).json({ error: 'Access denied' });
+
+    const docContent = doc.rows[0].content || [];
+    if (docContent.length === 0) return res.status(400).json({ error: 'Cannot release an empty document' });
+
+    // Get next version number
+    const verResult = await pool.query(
+      `SELECT COALESCE(MAX(version_number), 0) as max_ver FROM releases WHERE document_id = $1`,
+      [req.params.id]
+    );
+    const nextVersion = verResult.rows[0].max_ver + 1;
+
+    const result = await pool.query(
+      `INSERT INTO releases (document_id, content, title, description, version_number, created_by)
+       VALUES ($1, $2::jsonb, $3, $4, $5, $6) RETURNING *`,
+      [req.params.id, JSON.stringify(docContent), title, description || null, nextVersion, req.userId]
+    );
+
+    // Also update published_content
+    await pool.query(
+      `UPDATE documents SET published_content = $1::jsonb, updated_at = NOW(), updated_by = $2 WHERE id = $3`,
+      [JSON.stringify(docContent), req.userId, req.params.id]
+    );
+
+    const release = result.rows[0];
+    const author = await pool.query('SELECT username FROM users WHERE id = $1', [req.userId]);
+
+    res.status(201).json({
+      ...release,
+      version_number: release.version_number,
+      content: docContent,
+      author: author.rows[0]?.username,
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/documents/:id/releases', authMiddleware, async (req, res) => {
+  try {
+    const doc = await pool.query('SELECT project_id FROM documents WHERE id = $1', [req.params.id]);
+    if (doc.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    const canView = await requireRole(req.userId, doc.rows[0].project_id, 'viewer');
+    if (!canView) return res.status(403).json({ error: 'Access denied' });
+
+    const result = await pool.query(
+      `SELECT r.*, u.username as author FROM releases r
+       LEFT JOIN users u ON r.created_by = u.id
+       WHERE r.document_id = $1
+       ORDER BY r.version_number DESC`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/documents/:id/releases/:releaseId', authMiddleware, async (req, res) => {
+  try {
+    const doc = await pool.query('SELECT project_id FROM documents WHERE id = $1', [req.params.id]);
+    if (doc.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+    const canView = await requireRole(req.userId, doc.rows[0].project_id, 'viewer');
+    if (!canView) return res.status(403).json({ error: 'Access denied' });
+
+    const result = await pool.query(
+      `SELECT r.*, u.username as author FROM releases r
+       LEFT JOIN users u ON r.created_by = u.id
+       WHERE r.document_id = $1 AND r.id = $2`,
+      [req.params.id, req.params.releaseId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Release not found' });
+    const release = result.rows[0];
+    res.json({
+      ...release,
+      content: typeof release.content === 'string' ? JSON.parse(release.content) : release.content,
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Share (public, no auth) ───
+app.get('/api/share/:token', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT d.id, d.title, d.published_content, d.is_public, d.public_token,
+              u.username as author_name, d.updated_at
+       FROM documents d
+       LEFT JOIN users u ON d.created_by = u.id
+       WHERE d.public_token = $1 AND d.is_public = true`,
+      [req.params.token]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Document not found or not shared' });
+    const doc = result.rows[0];
+
+    const releases = await pool.query(
+      `SELECT r.id, r.title, r.description, r.version_number, r.created_at, u.username as author
+       FROM releases r
+       LEFT JOIN users u ON r.created_by = u.id
+       WHERE r.document_id = $1
+       ORDER BY r.version_number DESC`,
+      [doc.id]
+    );
+
+    res.json({
+      id: doc.id,
+      title: doc.title,
+      content: typeof doc.published_content === 'string' ? JSON.parse(doc.published_content) : doc.published_content,
+      author_name: doc.author_name,
+      updated_at: doc.updated_at,
+      releases: releases.rows,
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Upload ───
 app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -369,33 +979,36 @@ app.delete('/api/uploads/:filename', authMiddleware, async (req, res) => {
   const filename = path.basename(req.params.filename);
   const filePath = path.join(UPLOAD_DIR, filename);
   try {
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Delete failed' });
   }
 });
 
-/* ─── Export ─── */
+// ─── Export ───
 app.get('/api/export', authMiddleware, async (req, res) => {
   try {
-    const folders = await pool.query('SELECT * FROM folders WHERE user_id = $1', [req.userId]);
-    const docs = await pool.query(
-      `SELECT d.*, f.name as folder_name FROM documents d
-       LEFT JOIN folders f ON d.folder_id = f.id
-       WHERE d.user_id = $1`,
+    const folders = await pool.query(
+      `SELECT f.*, p.name as project_name FROM folders f
+       JOIN projects p ON f.project_id = p.id
+       WHERE EXISTS (SELECT 1 FROM project_members WHERE project_id = f.project_id AND user_id = $1)`,
       [req.userId]
     );
-
-    const data = {
+    const docs = await pool.query(
+      `SELECT d.*, f.name as folder_name, p.name as project_name FROM documents d
+       JOIN projects p ON d.project_id = p.id
+       LEFT JOIN folders f ON d.folder_id = f.id
+       WHERE EXISTS (SELECT 1 FROM project_members WHERE project_id = d.project_id AND user_id = $1)`,
+      [req.userId]
+    );
+    res.json({
       exportedAt: new Date().toISOString(),
       folders: folders.rows,
       documents: docs.rows,
-    };
-    res.json(data);
+    });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

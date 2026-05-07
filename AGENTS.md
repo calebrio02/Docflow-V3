@@ -2,49 +2,55 @@
 
 ## Architecture
 
-- **Frontend:** React 19 + Vite 6 + TipTap 2. Everything in `src/App.jsx` (~1580 lines). All inline components — no separate component files.
-- **Backend:** Express 4 + PostgreSQL 16 in `server/server.js` (~400 lines). Auto-creates tables on startup.
-- **Auth:** Bearer token. Login → token saved to `localStorage('docflow-token')`. Server validates via `process.env.AUTH_TOKEN` (default: `docflow-production-token-7f8a9b2c`). Default creds: `admin` / `admin123`.
-- **Storage:** Documents persist to PostgreSQL via `PUT /api/documents/:id`. Drafts also saved to `localStorage('docflow-draft-content')` every 500ms (legacy).
-- **Files:** Images uploaded → converted to WebP via `sharp`. Videos stored as-is. Both served from `server/data/uploads` via `/uploads/`. Shared as Docker volume.
+- **Frontend:** React 19 + Vite 6 + BlockNote (`@blocknote/react` 0.50) + TipTap. Everything in `src/App.jsx`. Tailwind CSS.
+- **Backend:** Express 4 + PostgreSQL 16 in `server/server.js`. Auto-creates tables on startup via `initDB()`.
+- **Auth:** Bearer token stored in `localStorage('docflow-token')`. Server validates against `process.env.AUTH_TOKEN` (default: `docflow-production-token-7f8a9b2c`). Default creds: `admin` / `admin123`.
+- **Storage:** Document draft content → `documents.content` (JSONB). Published content → `documents.published_content` (JSONB). Files → `server/data/uploads` (shared Docker volume).
+- **Frontend routes:** `/` = editor, `/share/:token` = public read-only, `/invite/:token` = accept invite.
 
 ## Commands
 
 ```bash
 npm run dev              # Vite dev server → http://localhost:3000
 npm run dev:api          # Express API → http://localhost:4000
-npm run dev:all          # Both concurrently (requires `concurrently` in server/package.json)
 npm run build            # → dist/
-docker-compose up --build   # Full stack (db+api+web) → http://localhost:8090
-docker compose build --no-cache  # Rebuild after every frontend change (nginx caches assets)
+docker compose up        # Full stack → http://localhost:8090
+docker compose build --no-cache   # Mandatory after every frontend change (nginx caches with expires 1y)
+docker compose down -v   # Wipe all data (volumes)
 ```
+
+`npm run dev:all` (concurrently) is defined in `package.json` but `concurrently` is **not installed** — install it first or run the two commands separately.
+
+## Auth flow
+
+- `POST /api/auth/login` → `{ token, userId, username, email }`. Frontend saves `token` to `localStorage('docflow-token')` and `userId` to `localStorage('docflow-userId')`.
+- `POST /api/auth/register` — only works with `invitationToken` (invitation-only signup).
+- `POST /api/invitations/accept` — used by invite acceptance view.
 
 ## Gotchas
 
-- **`editorRef` pattern required.** The TipTap `editor` instance is stored in `useRef` and synced via `useEffect` (`editorRef.current = editor`). Any callback that references `editor` (in `useCallback` deps or closures) **must** use `editorRef.current` instead. Direct `editor` references cause `Cannot access 'De' before initialization` in minified bundles. **Never delete or rename `editorRef`** — it's used in `editorProps.paste`, `handleDocSelect`, `loadDocument`, `handleInsertVideo`, etc. Deleting its declaration causes `ReferenceError: editorRef is not defined` and blank page.
-- **Toolbar buttons use `onMouseDown={(e) => e.preventDefault()} + onClick`.** TipTap steals focus on mousedown. Adding new buttons must follow this pattern exactly.
-- **Video extension** (`src/extensions/videoResize.js`) is a TipTap block-level node with `addNodeView()`. Resize is handled inside `addNodeView()` via `mousedown` on handle → `mousemove`/`mouseup` on document → `setNodeMarkup(p, undefined, attrs)` — same pattern as `imageResize.js`. Wrapper uses `width: fit-content` + `margin: auto` for alignment; has `data-video-pos` attribute for selection. Supports `align` attribute (`left`/`center`/`right`) via `data-align`. Toolbar alignment buttons check `selectedVideoPos.current` first, fall back to `setTextAlign` for text nodes.
-- **Image paste** intercepts via `editorProps.handleDOMEvents.paste`, reads images as base64, calls `processFile()` which uploads to backend and dispatches `editor.commands.setImage()`.
-- **Table context menu** fires on `contextmenu` DOM event when `target.closest('table')`. Fixed-position overlay with viewport-boundary correction.
-- **Nginx caching:** `expires 1y` + `Cache-Control: public, immutable` on static assets. Never skip `--no-cache` rebuild.
-- **`initialContent`** is a template string at `App.jsx:50`.
-- **`server/server.js`** runs `initDB()` synchronously before `app.listen()`. Creates tables and default admin user on every start.
+- **`X-User-Id` header required.** Every request to a protected endpoint must include `X-User-Id` header with the integer userId from login response. `api.js` handles this automatically via `localStorage('docflow-userId')`.
+- **PostgreSQL JSONB cast.** `'[]'` is `text`, not `jsonb`. Always use `::jsonb`: `COALESCE($4::jsonb, '[]'::jsonb)`.
+- **PUT parameter indexing.** Dynamic UPDATE queries must track `${idx}` carefully — params array and SQL placeholders must align exactly.
+- **Toolbar buttons use `onMouseDown={(e) => e.preventDefault()} + onClick`.** TipTap steals focus on mousedown.
+- **`initDB()` runs migrations safely.** It no longer drops tables on startup.
+- **BlockNote integrated.** Full integration is now in `src/components/Editor/BlockNoteEditor.jsx`.
+- **`concurrently` is installed.** `npm run dev:all` works out of the box.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `src/App.jsx` | Everything. Editor, auth, sidebar, modals, toolbar, video resize observer, paste handler. |
-| `src/extensions/videoResize.js` | TipTap `video` node — `addNodeView()` resize handle, `insertVideo`/`setVideoAlign` commands, `src`/`width`/`height`/`align`/`controls` attrs, `data-video-pos` wrapper. |
-| `src/extensions/imageResize.js` | Extends `@tiptap/extension-image` with `addNodeView` resize handle. |
-| `src/api.js` | Fetch client for `/api/*` endpoints. Attaches `Bearer` token. |
-| `server/server.js` | Express API: auth login, folders CRUD, documents CRUD, file upload (multer + sharp), export. |
-| `docker-compose.yml` | 3 services: `db` (pg), `api` (express), `web` (nginx). Shared `uploads_data` volume. |
-| `docker/nginx/default.conf` | Proxies `/api/` → `api:4000`, serves static from `/usr/share/nginx/html`, caches aggressively. |
-| `vite.config.js` | Dev server port **3000**, `host: true`. |
+| `src/App.jsx` | Main application entry and state management. |
+| `src/components/` | Modular UI components (Auth, Modals, Panels, Editor). |
+| `src/api.js` | Fetch client. Stores `docflow-token` and `docflow-userId` in localStorage. |
+| `server/server.js` | Express API: auth, projects, members, invites, folders, documents, releases, share, upload, export. |
 
 ## Conventions
 
 - No lint/typecheck/test scripts. Verify manually.
 - Tailwind utility classes throughout. No CSS modules.
-- Spanish UI strings (toolbar labels, context menu, modals).
+- English UI strings.
+- All data migrations use `DO $$ BEGIN ... END $$` blocks (not `try/catch` which aborts PostgreSQL transactions).
+- Documents belong to projects. Folders are sub-nested within projects.
+- Copying a document clones content and preserves releases as history.

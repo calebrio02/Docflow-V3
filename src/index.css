@@ -4,203 +4,65 @@
 
 @layer base {
   html {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-      'Helvetica Neue', Arial, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    @apply text-slate-900 antialiased;
   }
 
   body {
-    @apply bg-gray-100 text-slate-800 antialiased;
+    @apply bg-slate-50;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
   }
 }
 
 @layer components {
-  .tiptap {
-    @apply focus:outline-none;
+  .premium-card {
+    @apply bg-white rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-all duration-300;
   }
 
-  .tiptap p.is-editor-empty:first-child::before {
-    content: attr(data-placeholder);
-    @apply float-left text-slate-400 pointer-events-none h-0;
+  .premium-input {
+    @apply w-full px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all;
+  }
+
+  .premium-button {
+    @apply px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold shadow-sm hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-2;
   }
 }
 
-/* Override @tailwindcss/typography (prose) so everything is dark */
-@layer utilities {
-  .prose {
-    color: #0f172a;
-  }
-
-  .prose p,
-  .prose li,
-  .prose span,
-  .prose a {
-    color: #0f172a;
-  }
-
-  .prose h1,
-  .prose h2,
-  .prose h3,
-  .prose h4 {
-    color: #0f172a;
-  }
-
-  .prose ul,
-  .prose ol {
-    list-style-position: outside;
-  }
-
-  .prose ul {
-    list-style-type: disc;
-  }
-
-  .prose ol {
-    list-style-type: decimal;
-  }
-
-  .prose li {
-    margin-left: 1.5em;
-    padding-left: 0;
-  }
-
-  .prose li::marker {
-    color: #0f172a;
-  }
-
-  .prose blockquote {
-    color: #1e293b;
-    border-left-color: #94a3b8;
-    font-style: italic;
-  }
-
-  .prose code {
-    color: #0f172a;
-    background-color: #f1f5f9;
-  }
-
-  .prose pre {
-    color: #0f172a;
-    background-color: #f1f5f9;
-  }
-
-  .prose pre code {
-    color: inherit;
-    background: none;
-    padding: 0;
-    font-size: inherit;
-    font-weight: inherit;
-    border-radius: 0;
-  }
-
-  .prose a {
-    color: #2563eb;
-  }
-
-  .prose hr {
-    border-color: #e2e8f0;
-  }
-
-  .prose strong {
-    color: #0f172a;
-  }
-
-  .prose em {
-    color: #0f172a;
-  }
-
-  .prose table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 1.5rem 0;
-    overflow: auto;
-  }
-
-  .prose thead {
-    background-color: #f1f5f9;
-  }
-
-  .prose th {
-    color: #0f172a;
-    font-weight: 600;
-    text-align: left;
-    border: 1px solid #cbd5e1;
-    padding: 0.5rem 0.75rem;
-  }
-
-  .prose td {
-    color: #0f172a;
-    border: 1px solid #cbd5e1;
-    padding: 0.5rem 0.75rem;
-    vertical-align: top;
-  }
-
-  .prose tbody tr:nth-child(even) {
-    background-color: #f8fafc;
-  }
-
-  .prose .tableWrapper {
-    padding-right: 0;
-  }
-
-  .prose .resize-cursor {
-    cursor: col-resize;
-  }
-
-  .prose ul[data-type="taskList"] {
-    list-style: none;
-    padding-left: 0;
-    margin: 0;
-  }
-
-  .prose ul[data-type="taskList"] li {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-    margin: 0;
-    padding: 0.25rem 0;
-  }
-
-  .prose ul[data-type="taskList"] li label {
-    margin: 0;
-    flex: 0 0 auto;
-  }
-
-  .prose ul[data-type="taskList"] li label input[type="checkbox"] {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 1.125rem;
-    height: 1.125rem;
-    border: 2px solid #cbd5e1;
-    border-radius: 0.25rem;
-    cursor: pointer;
-    position: relative;
-    top: 0.25rem;
-    margin: 0;
-    transition: all 0.15s ease;
-  }
-
-  .prose ul[data-type="taskList"] li label input[type="checkbox"]:checked {
-    background-color: #3b82f6;
-    border-color: #3b82f6;
-  }
-
-  .prose ul[data-type="taskList"] li label input[type="checkbox"]:checked::after {
-    content: '';
-    position: absolute;
-    left: 0.3rem;
-    top: 0.1rem;
-    width: 0.3rem;
-    height: 0.6rem;
-    border: solid white;
-    border-width: 0 0.15rem 0.15rem 0;
-    transform: rotate(45deg);
-  }
-
-  .prose ul[data-type="taskList"] li label p {
-    margin: 0;
-  }
-
-  .prose ul[data-type="taskList"] li[data-checked="true"] p {
-    color: #94a3b8;
-    text-decoration: line-through;
-  }
+/* BlockNote Customization */
+.bn-container {
+  @apply bg-transparent !important;
 }
+
+.bn-editor {
+  @apply px-0 !important;
+  font-family: inherit !important;
+}
+
+/* Prose refinement */
+.prose {
+  @apply max-w-none;
+}
+
+.prose h1 { @apply text-4xl font-extrabold text-slate-900 mb-6; }
+.prose h2 { @apply text-2xl font-bold text-slate-800 mt-8 mb-4; }
+.prose h3 { @apply text-xl font-bold text-slate-800 mt-6 mb-3; }
+.prose p { @apply text-slate-600 leading-relaxed mb-4; }
+.prose ul { @apply list-disc list-outside mb-4 space-y-2; }
+.prose ol { @apply list-decimal list-outside mb-4 space-y-2; }
+.prose li { @apply ml-4 text-slate-600; }
+.prose blockquote { @apply border-l-4 border-slate-200 pl-4 italic text-slate-500 my-6; }
+.prose code { @apply bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-blue-600; }
+.prose pre { @apply bg-slate-900 text-slate-100 p-4 rounded-xl overflow-x-auto my-6 font-mono text-sm; }
