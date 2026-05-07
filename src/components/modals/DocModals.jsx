@@ -126,7 +126,7 @@ export function CreateProjectModal({ visible, onClose, onCreate }) {
   );
 }
 
-/* ─── Commit & Push / Release Modal ─── */
+/* ─── Release Modal ─── */
 export function ReleaseModal({ visible, onClose, onSave }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -142,7 +142,7 @@ export function ReleaseModal({ visible, onClose, onSave }) {
       <div className="p-6 space-y-4">
         <div className="flex items-center gap-2">
           <GitCommit size={18} style={{ color: 'var(--primary)' }} />
-          <p className="text-base font-bold" style={{ color: 'var(--text-main)' }}>Commit & Push Release</p>
+          <p className="text-base font-bold" style={{ color: 'var(--text-main)' }}>Publish New Release</p>
         </div>
         <ModalInput
           type="text" value={title} onChange={e => setTitle(e.target.value)}

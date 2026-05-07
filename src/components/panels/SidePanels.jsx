@@ -72,7 +72,7 @@ export function ReleasePanel({ releases, userRole, onViewRelease, onOpenPublish 
           <button onClick={onOpenPublish}
             className="px-2.5 py-1 text-xs font-bold text-white rounded-lg flex items-center gap-1 transition-colors"
             style={{ backgroundColor: 'var(--primary)' }}>
-            <GitCommit size={11} /> Commit
+            <GitCommit size={11} /> Release
           </button>
         )}
       </div>
@@ -81,7 +81,7 @@ export function ReleasePanel({ releases, userRole, onViewRelease, onOpenPublish 
           <div className="text-center py-10" style={{ color: 'var(--text-muted)' }}>
             <GitCommit size={28} className="mx-auto mb-3 opacity-40" />
             <p className="text-sm font-medium">No releases yet</p>
-            <p className="text-xs mt-1">Commit & Push to create your first</p>
+            <p className="text-xs mt-1">Create your first Release</p>
           </div>
         ) : (
           <div className="space-y-1">

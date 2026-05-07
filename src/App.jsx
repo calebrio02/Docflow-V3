@@ -399,7 +399,7 @@ function EditorView() {
     // Reload doc to get updated public_token if it was set
     const updatedDoc = await api.getDocument(docId);
     setDoc(updatedDoc);
-    alert('Changes committed and pushed successfully!');
+    alert('Release published successfully!');
   };
 
   const handleToggleShare = async (isPublic) => {
@@ -465,7 +465,7 @@ function EditorView() {
             )}
             {canEdit && (
               <button onClick={() => setShowReleaseModal(true)} className="affine-button px-5 py-2 text-sm flex items-center gap-2">
-                <GitCommit size={16} /> Commit & Push
+                <GitCommit size={16} /> Release
               </button>
             )}
           </div>
@@ -475,7 +475,7 @@ function EditorView() {
           <div className="max-w-4xl mx-auto px-12 pt-6 pb-16">
             <div className="border px-4 py-3 rounded-xl mb-8 flex items-center gap-3 text-sm font-medium" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', borderColor: 'rgba(245, 158, 11, 0.2)', color: '#d97706' }}>
               <FileText size={18} />
-              You are editing the Draft version. Public viewers will not see these changes until you "Commit & Push".
+              You are editing the Draft version. Public viewers will not see these changes until you "Release".
             </div>
             <div className="rounded-2xl px-10 py-10" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
               <BlockNoteEditor 
