@@ -83,14 +83,15 @@ const Video = Node.create({
       const pos = getPos();
       const wrapper = document.createElement('div');
       wrapper.contentEditable = 'false';
+      wrapper.setAttribute('data-video-pos', String(pos));
 
       const applyVideoAlign = (align) => {
         if (align === 'center') {
-          wrapper.style.cssText = 'display: block; margin: 8px auto; position: relative;';
+          wrapper.style.cssText = 'display: block; width: fit-content; margin: 8px auto; position: relative;';
         } else if (align === 'right') {
-          wrapper.style.cssText = 'display: block; margin: 8px 0 8px auto; position: relative;';
+          wrapper.style.cssText = 'display: block; width: fit-content; margin: 8px 0 8px auto; position: relative;';
         } else {
-          wrapper.style.cssText = 'display: block; margin: 8px 0; position: relative;';
+          wrapper.style.cssText = 'display: block; width: fit-content; margin: 8px 0; position: relative;';
         }
       };
 
@@ -206,6 +207,9 @@ const Video = Node.create({
         update: (updatedNode) => {
           if (updatedNode.type.name !== 'video') return false;
           currentNode = updatedNode;
+          if (typeof getPos === 'function') {
+            wrapper.setAttribute('data-video-pos', String(getPos()));
+          }
           video.src = updatedNode.attrs.src;
           video.width = updatedNode.attrs.width || 640;
           video.height = updatedNode.attrs.height || 360;

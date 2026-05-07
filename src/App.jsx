@@ -1355,16 +1355,29 @@ const selectedImagePos = useRef(null);
     if (!editor) return;
     const dom = editor.view.dom;
     const handleClick = (e) => {
-      const videoWrapper = e.target.closest('[data-type="video"]');
+      const videoWrapper = e.target.closest('[data-video-pos]');
+      const imageWrapper = e.target.closest('[data-image-pos]');
       if (videoWrapper) {
-        const pos = editor.view.posAtDOM(videoWrapper, 0);
-        if (pos != null && selectedVideoPos.current !== pos) {
+        const pos = parseInt(videoWrapper.getAttribute('data-video-pos'), 10);
+        if (selectedVideoPos.current !== pos) {
           selectedVideoPos.current = pos;
           setSelectedVideo(pos);
         }
         if (selectedImagePos.current !== null) {
           selectedImagePos.current = null;
           setSelectedImage(null);
+        }
+        return;
+      }
+      if (imageWrapper) {
+        const pos = parseInt(imageWrapper.getAttribute('data-image-pos'), 10);
+        if (selectedImagePos.current !== pos) {
+          selectedImagePos.current = pos;
+          setSelectedImage(pos);
+        }
+        if (selectedVideoPos.current !== null) {
+          selectedVideoPos.current = null;
+          setSelectedVideo(null);
         }
         return;
       }
