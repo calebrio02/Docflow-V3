@@ -112,6 +112,13 @@ async function runMigrations(client) {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folders' AND column_name='project_id') THEN
+        ALTER TABLE folders ADD COLUMN project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+      END IF;
+    END $$;
+  `);
 
   // documents
   await client.query(`
@@ -129,6 +136,16 @@ async function runMigrations(client) {
       created_by INTEGER REFERENCES users(id),
       updated_by INTEGER REFERENCES users(id)
     )
+  `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='documents' AND column_name='project_id') THEN
+        ALTER TABLE documents ADD COLUMN project_id UUID REFERENCES projects(id) ON DELETE CASCADE;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='documents' AND column_name='published_content') THEN
+        ALTER TABLE documents ADD COLUMN published_content JSONB;
+      END IF;
+    END $$;
   `);
 
   // releases (commits públicos)
