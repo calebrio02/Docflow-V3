@@ -686,7 +686,7 @@ function Sidebar({
 }
 
 /* ─── Toolbar ─── */
-function Toolbar({ editor, onOpenLinkModal, onInsertImage, onInsertVideo, selectedImagePos, selectedImage }) {
+function Toolbar({ editor, onOpenLinkModal, onInsertImage, onInsertVideo, selectedImagePos, selectedImage, selectedVideoPos, selectedVideo }) {
   const currentLink = editor?.isActive('link') ? editor.getAttributes('link').href : null;
   if (!editor) return null;
 
@@ -695,6 +695,19 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage, onInsertVideo, select
     try {
       const node = editor.view.state.doc.nodeAt(selectedImage);
       if (node && node.type.name === 'image') {
+        return node.attrs.align || null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getSelectedVideoAlign = () => {
+    if (selectedVideo === null) return null;
+    try {
+      const node = editor.view.state.doc.nodeAt(selectedVideo);
+      if (node && node.type.name === 'video') {
         return node.attrs.align || null;
       }
       return null;
@@ -793,62 +806,92 @@ function Toolbar({ editor, onOpenLinkModal, onInsertImage, onInsertVideo, select
       <div className={dividerClass} />
 
       <Btn
-        pred={() => {
-          const pos = selectedImagePos.current;
-          if (pos !== null) {
-            const { schema, doc } = editor.view.state;
-            const node = doc.nodeAt(pos);
-            if (node) {
-              const newNode = schema.nodes.image.create({ ...node.attrs, align: 'left' });
-              editor.view.dispatch(
-                editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
-              );
-            }
-          } else {
-            editor.chain().focus().setTextAlign('left').run();
-          }
-        }}
-        icon={AlignLeft}
-        active={getSelectedImageAlign() === 'left' || editor.isActive({ textAlign: 'left' })}
-      />
-      <Btn
-        pred={() => {
-          const pos = selectedImagePos.current;
-          if (pos !== null) {
-            const { schema, doc } = editor.view.state;
-            const node = doc.nodeAt(pos);
-            if (node) {
-              const newNode = schema.nodes.image.create({ ...node.attrs, align: 'center' });
-              editor.view.dispatch(
-                editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
-              );
-            }
-          } else {
-            editor.chain().focus().setTextAlign('center').run();
-          }
-        }}
-        icon={AlignCenter}
-        active={getSelectedImageAlign() === 'center' || editor.isActive({ textAlign: 'center' })}
-      />
-      <Btn
-        pred={() => {
-          const pos = selectedImagePos.current;
-          if (pos !== null) {
-            const { schema, doc } = editor.view.state;
-            const node = doc.nodeAt(pos);
-            if (node) {
-              const newNode = schema.nodes.image.create({ ...node.attrs, align: 'right' });
-              editor.view.dispatch(
-                editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
-              );
-            }
-          } else {
-            editor.chain().focus().setTextAlign('right').run();
-          }
-        }}
-        icon={AlignRight}
-        active={getSelectedImageAlign() === 'right' || editor.isActive({ textAlign: 'right' })}
-      />
+         pred={() => {
+           const pos = selectedImagePos.current;
+           const vPos = selectedVideoPos.current;
+           if (pos !== null) {
+             const { schema, doc } = editor.view.state;
+             const node = doc.nodeAt(pos);
+             if (node) {
+               const newNode = schema.nodes.image.create({ ...node.attrs, align: 'left' });
+               editor.view.dispatch(
+                 editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
+               );
+             }
+           } else if (vPos !== null) {
+             const { schema, doc } = editor.view.state;
+             const node = doc.nodeAt(vPos);
+             if (node) {
+               const newNode = schema.nodes.video.create({ ...node.attrs, align: 'left' });
+               editor.view.dispatch(
+                 editor.view.state.tr.replaceWith(vPos, vPos + 1, newNode)
+               );
+             }
+           } else {
+             editor.chain().focus().setTextAlign('left').run();
+           }
+         }}
+         icon={AlignLeft}
+         active={getSelectedImageAlign() === 'left' || getSelectedVideoAlign() === 'left' || editor.isActive({ textAlign: 'left' })}
+       />
+       <Btn
+         pred={() => {
+           const pos = selectedImagePos.current;
+           const vPos = selectedVideoPos.current;
+           if (pos !== null) {
+             const { schema, doc } = editor.view.state;
+             const node = doc.nodeAt(pos);
+             if (node) {
+               const newNode = schema.nodes.image.create({ ...node.attrs, align: 'center' });
+               editor.view.dispatch(
+                 editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
+               );
+             }
+           } else if (vPos !== null) {
+             const { schema, doc } = editor.view.state;
+             const node = doc.nodeAt(vPos);
+             if (node) {
+               const newNode = schema.nodes.video.create({ ...node.attrs, align: 'center' });
+               editor.view.dispatch(
+                 editor.view.state.tr.replaceWith(vPos, vPos + 1, newNode)
+               );
+             }
+           } else {
+             editor.chain().focus().setTextAlign('center').run();
+           }
+         }}
+         icon={AlignCenter}
+         active={getSelectedImageAlign() === 'center' || getSelectedVideoAlign() === 'center' || editor.isActive({ textAlign: 'center' })}
+       />
+       <Btn
+         pred={() => {
+           const pos = selectedImagePos.current;
+           const vPos = selectedVideoPos.current;
+           if (pos !== null) {
+             const { schema, doc } = editor.view.state;
+             const node = doc.nodeAt(pos);
+             if (node) {
+               const newNode = schema.nodes.image.create({ ...node.attrs, align: 'right' });
+               editor.view.dispatch(
+                 editor.view.state.tr.replaceWith(pos, pos + 1, newNode)
+               );
+             }
+           } else if (vPos !== null) {
+             const { schema, doc } = editor.view.state;
+             const node = doc.nodeAt(vPos);
+             if (node) {
+               const newNode = schema.nodes.video.create({ ...node.attrs, align: 'right' });
+               editor.view.dispatch(
+                 editor.view.state.tr.replaceWith(vPos, vPos + 1, newNode)
+               );
+             }
+           } else {
+             editor.chain().focus().setTextAlign('right').run();
+           }
+         }}
+         icon={AlignRight}
+         active={getSelectedImageAlign() === 'right' || getSelectedVideoAlign() === 'right' || editor.isActive({ textAlign: 'right' })}
+       />
 
       <div className={dividerClass} />
 
@@ -937,9 +980,14 @@ export default function App() {
   const saveTimerRef = useRef(null);
   const fileInputRef = useRef(null);
   const videoInputRef = useRef(null);
-  const selectedImagePos = useRef(null);
-  const editorRef = useRef(null);
-  const [selectedImage, setSelectedImage] = useState(null);
+const selectedImagePos = useRef(null);
+   const editorRef = useRef(null);
+
+   const [selectedImage, setSelectedImage] = useState(null);
+
+   const selectedVideoPos = useRef(null);
+
+  const [selectedVideo, setSelectedVideo] = useState(null);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -1256,18 +1304,39 @@ export default function App() {
     if (!editor) return;
     const dom = editor.view.dom;
     const handleClick = (e) => {
-      const wrapper = e.target.closest('[data-image-pos]');
-      if (!wrapper) {
+      const videoWrapper = e.target.closest('[data-video-pos]');
+      const imageWrapper = e.target.closest('[data-image-pos]');
+      if (videoWrapper) {
+        const pos = parseInt(videoWrapper.getAttribute('data-video-pos'), 10);
+        if (selectedVideoPos.current !== pos) {
+          selectedVideoPos.current = pos;
+          setSelectedVideo(pos);
+        }
         if (selectedImagePos.current !== null) {
           selectedImagePos.current = null;
           setSelectedImage(null);
         }
         return;
       }
-      const pos = parseInt(wrapper.getAttribute('data-image-pos'), 10);
-      if (selectedImagePos.current !== pos) {
-        selectedImagePos.current = pos;
-        setSelectedImage(pos);
+      if (imageWrapper) {
+        const pos = parseInt(imageWrapper.getAttribute('data-image-pos'), 10);
+        if (selectedImagePos.current !== pos) {
+          selectedImagePos.current = pos;
+          setSelectedImage(pos);
+        }
+        if (selectedVideoPos.current !== null) {
+          selectedVideoPos.current = null;
+          setSelectedVideo(null);
+        }
+        return;
+      }
+      if (selectedImagePos.current !== null) {
+        selectedImagePos.current = null;
+        setSelectedImage(null);
+      }
+      if (selectedVideoPos.current !== null) {
+        selectedVideoPos.current = null;
+        setSelectedVideo(null);
       }
     };
     dom.addEventListener('click', handleClick);
@@ -1285,130 +1354,31 @@ export default function App() {
   useEffect(() => {
     if (!editor) return;
     const dom = editor.view.dom;
-
-    const addVideoResize = (video) => {
-      const wrapper = document.createElement('div');
-      wrapper.style.position = 'relative';
-      wrapper.style.display = 'block';
-      wrapper.style.maxWidth = '100%';
-      wrapper.style.margin = '8px 0';
-
-      const currentWidth = parseInt(video.style.width, 10) || video.getAttribute('width') || 640;
-      const currentHeight = parseInt(video.style.height, 10) || video.getAttribute('height') || 360;
-      video.style.width = `${currentWidth}px`;
-      video.style.height = `${currentHeight}px`;
-      video.style.maxWidth = '100%';
-      video.style.borderRadius = '8px';
-
-      const handle = document.createElement('div');
-      handle.style.cssText = `
-        position: absolute;
-        bottom: -4px;
-        right: -4px;
-        width: 16px;
-        height: 16px;
-        background: #fff;
-        border: 2px solid #3b82f6;
-        border-radius: 50%;
-        cursor: se-resize;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        opacity: 0;
-        transition: opacity 0.15s;
-        z-index: 10;
-        pointer-events: auto;
-      `;
-
-      wrapper.appendChild(video);
-      wrapper.appendChild(handle);
-      video.parentNode?.insertBefore(wrapper, video);
-
-      let isResizing = false;
-      let startX = 0;
-      let startW = currentWidth;
-      let startH = currentHeight;
-      let destroyed = false;
-
-      const onMouseDown = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        isResizing = true;
-        startX = e.clientX;
-        startW = currentWidth;
-        startH = currentHeight;
-        document.body.style.userSelect = 'none';
-        document.body.style.cursor = 'se-resize';
-      };
-
-      const onMouseMove = (e) => {
-        if (!isResizing || destroyed) return;
-        e.preventDefault();
-        const dx = e.clientX - startX;
-        const dy = e.clientY - (startX + startW);
-        const delta = Math.max(dx, dy);
-        const newWidth = Math.max(200, startW + delta);
-        const ratio = startW / startH;
-        const newHeight = Math.max(112, newWidth / ratio);
-        video.style.width = `${newWidth}px`;
-        video.style.height = `${newHeight}px`;
-      };
-
-      const onMouseUp = (e) => {
-        if (!isResizing || destroyed) return;
-        isResizing = false;
-        document.body.style.userSelect = '';
-        document.body.style.cursor = '';
-        const newWidth = parseInt(video.style.width, 10);
-        const newHeight = parseInt(video.style.height, 10);
-        const pos = editor.view.posAtDOM(video, 0);
-        if (pos != null) {
-          editor.view.dispatch(editor.view.state.tr.setNodeMarkup(pos, undefined, {
-            ...video.attributes,
-            width: newWidth,
-            height: newHeight,
-          }));
+    const handleClick = (e) => {
+      const videoWrapper = e.target.closest('[data-type="video"]');
+      if (videoWrapper) {
+        const pos = editor.view.posAtDOM(videoWrapper, 0);
+        if (pos != null && selectedVideoPos.current !== pos) {
+          selectedVideoPos.current = pos;
+          setSelectedVideo(pos);
         }
-      };
-
-      handle.addEventListener('mousedown', onMouseDown);
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-
-      const observer = new MutationObserver((mutations) => {
-        for (const m of mutations) {
-          for (const node of m.addedNodes) {
-            if (node instanceof HTMLElement && node.tagName === 'VIDEO') {
-              addVideoResize(node);
-            }
-            if (node instanceof HTMLElement) {
-              node.querySelectorAll?.('video').forEach(addVideoResize);
-            }
-          }
+        if (selectedImagePos.current !== null) {
+          selectedImagePos.current = null;
+          setSelectedImage(null);
         }
-      });
-
-      observer.observe(dom, { childList: true, subtree: true });
-
-      return () => {
-        destroyed = true;
-        handle.removeEventListener('mousedown', onMouseDown);
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        observer.disconnect();
-        wrapper.replaceWith(video);
-      };
+        return;
+      }
+      if (selectedImagePos.current !== null) {
+        selectedImagePos.current = null;
+        setSelectedImage(null);
+      }
+      if (selectedVideoPos.current !== null) {
+        selectedVideoPos.current = null;
+        setSelectedVideo(null);
+      }
     };
-
-    const videos = dom.querySelectorAll('video');
-    videos.forEach(addVideoResize);
-
-    return () => {
-      dom.querySelectorAll('[style*="position: relative"]').forEach((el) => {
-        if (el.querySelector?.('video')) {
-          const video = el.querySelector('video');
-          el.replaceWith(video);
-        }
-      });
-    };
+    dom.addEventListener('click', handleClick);
+    return () => dom.removeEventListener('click', handleClick);
   }, [editor]);
 
   const handleMenuAction = useCallback(
@@ -1500,7 +1470,9 @@ export default function App() {
             onInsertImage={handleInsertImage}
             onInsertVideo={handleInsertVideo}
             selectedImagePos={selectedImagePos}
-            selectedImage={selectedImage}
+             selectedImage={selectedImage}
+             selectedVideoPos={selectedVideoPos}
+             selectedVideo={selectedVideo}
           />
         </div>
       </div>
