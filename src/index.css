@@ -3,66 +3,162 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --bg-main: #fafafa;
+    --bg-card: #ffffff;
+    --bg-hover: #f4f5f5;
+    --text-main: #111112;
+    --text-muted: #8e8e93;
+    --border-color: #ebebeb;
+    --primary: #1e96eb;
+    --primary-hover: #167bc1;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  }
+
+  .dark {
+    --bg-main: #1a1a1c;
+    --bg-card: #28282a;
+    --bg-hover: #323234;
+    --text-main: #f3f3f4;
+    --text-muted: #8a8a8e;
+    --border-color: #3e3e40;
+    --primary: #1e96eb;
+    --primary-hover: #48aef0;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  }
+
   html {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    @apply text-slate-900 antialiased;
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    transition: background-color 0.3s, color 0.3s;
   }
 
   body {
-    @apply bg-slate-50;
+    background-color: var(--bg-main);
+    color: var(--text-main);
   }
 
   /* Custom Scrollbar */
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-transparent;
+    background: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+    background: var(--border-color);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
   }
 }
 
 @layer components {
-  .premium-card {
-    @apply bg-white rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-all duration-300;
+  .affine-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+    border-radius: 12px;
+    transition: all 0.2s ease;
+  }
+  .affine-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
   }
 
-  .premium-input {
-    @apply w-full px-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all;
+  .affine-input {
+    background-color: var(--bg-main);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    border-radius: 8px;
+    transition: all 0.2s;
+  }
+  .affine-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(30, 150, 235, 0.2);
+    outline: none;
   }
 
-  .premium-button {
-    @apply px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold shadow-sm hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-2;
+  .affine-button {
+    background-color: var(--primary);
+    color: white;
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+  .affine-button:hover {
+    background-color: var(--primary-hover);
+  }
+  
+  .affine-button-outline {
+    background-color: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+  .affine-button-outline:hover {
+    background-color: var(--bg-hover);
   }
 }
 
 /* BlockNote Customization */
-.bn-container {
-  @apply bg-transparent !important;
+/* Force the editor canvas background to match our card color.
+   This eliminates the two-tone contrast between the wrapper and the editor. */
+
+/* Light mode: match white card */
+.bn-container,
+.bn-editor,
+.mantine-RichTextEditor-root {
+  background-color: #ffffff !important;
+}
+
+/* Dark mode: make editor transparent so it shows our --bg-card */
+.dark .bn-container,
+.dark .bn-editor,
+.dark [class*='tableWrapper'],
+.dark [class*='editor'] {
+  background-color: transparent !important;
+}
+
+/* Ensure BlockNote's internal Mantine overrides don't leak their own dark bg */
+.dark [data-mantine-color-scheme='dark'] .bn-editor,
+.dark .bn-editor .ProseMirror {
+  background-color: transparent !important;
 }
 
 .bn-editor {
-  @apply px-0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
   font-family: inherit !important;
 }
 
-/* Prose refinement */
-.prose {
-  @apply max-w-none;
+/* Prose refinement for dark mode */
+.dark .prose {
+  color: var(--text-main);
 }
-
-.prose h1 { @apply text-4xl font-extrabold text-slate-900 mb-6; }
-.prose h2 { @apply text-2xl font-bold text-slate-800 mt-8 mb-4; }
-.prose h3 { @apply text-xl font-bold text-slate-800 mt-6 mb-3; }
-.prose p { @apply text-slate-600 leading-relaxed mb-4; }
-.prose ul { @apply list-disc list-outside mb-4 space-y-2; }
-.prose ol { @apply list-decimal list-outside mb-4 space-y-2; }
-.prose li { @apply ml-4 text-slate-600; }
-.prose blockquote { @apply border-l-4 border-slate-200 pl-4 italic text-slate-500 my-6; }
-.prose code { @apply bg-slate-100 px-1.5 py-0.5 rounded text-sm font-mono text-blue-600; }
-.prose pre { @apply bg-slate-900 text-slate-100 p-4 rounded-xl overflow-x-auto my-6 font-mono text-sm; }
+.dark .prose h1, .dark .prose h2, .dark .prose h3, .dark .prose h4, .dark .prose strong {
+  color: var(--text-main);
+}
+.dark .prose p, .dark .prose li {
+  color: var(--text-muted);
+}
+.dark .prose code {
+  background-color: var(--bg-card);
+  color: var(--primary);
+}
+.dark .prose pre {
+  background-color: #111112;
+}
+.dark .prose blockquote {
+  border-left-color: var(--border-color);
+  color: var(--text-muted);
+}

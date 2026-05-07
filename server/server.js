@@ -673,6 +673,8 @@ app.get('/api/documents/:id', authMiddleware, async (req, res) => {
       project_id: doc.project_id,
       folder_id: doc.folder_id,
       title: doc.title,
+      is_public: doc.is_public,
+      public_token: doc.public_token,
       content: doc.content || [],
       created_at: doc.created_at,
       updated_at: doc.updated_at,
@@ -910,7 +912,7 @@ app.get('/api/share/:token', async (req, res) => {
     const doc = result.rows[0];
 
     const releases = await pool.query(
-      `SELECT r.id, r.title, r.description, r.version_number, r.created_at, u.username as author
+      `SELECT r.id, r.title, r.description, r.version_number, r.created_at, r.content, u.username as author
        FROM releases r
        LEFT JOIN users u ON r.created_by = u.id
        WHERE r.document_id = $1
@@ -924,7 +926,10 @@ app.get('/api/share/:token', async (req, res) => {
       content: typeof doc.published_content === 'string' ? JSON.parse(doc.published_content) : doc.published_content,
       author_name: doc.author_name,
       updated_at: doc.updated_at,
-      releases: releases.rows,
+      releases: releases.rows.map(r => ({
+        ...r,
+        content: typeof r.content === 'string' ? JSON.parse(r.content) : r.content,
+      })),
     });
   } catch (err) {
     console.error('Login error:', err);

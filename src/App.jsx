@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import React from 'react';
+import { Routes, Route, useNavigate, useParams, Link } from 'react-router-dom';
 import {
   FileText, Folder, Plus, LogOut, Loader2,
   Users, GitCommit, Copy, Eye, Unlock, Lock, Clock,
-  Check, Trash2, ChevronDown, FolderOpen,
-  Undo, Redo, Bold, Italic, Strikethrough, Code, Heading1, Heading2, Heading3,
-  List, ListOrdered, CheckSquare, Quote, AlignLeft, AlignCenter, AlignRight,
-  Minus, Table as TableIcon, Image as ImageIcon, Video
+  Check, Trash2, ChevronRight, Home, ChevronLeft, Moon, Sun
 } from 'lucide-react';
 
 import { api } from './api';
@@ -18,89 +17,27 @@ import { MembersPanel, ReleasePanel } from './components/panels/SidePanels';
 import { BlockNoteEditor } from './components/Editor/BlockNoteEditor';
 
 export default function App() {
-  const token = localStorage.getItem('docflow-token');
+  const [token, setToken] = useState(localStorage.getItem('docflow-token'));
   const isLoggedIn = !!token;
-
-  const [currentView, setCurrentView] = useState('app'); // app | invite-accept | share
-  const [inviteToken, setInviteToken] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const [projects, setProjects] = useState([]);
-  const [activeProject, setActiveProject] = useState(null);
-  const [documents, setDocuments] = useState([]);
-  const [activeDoc, setActiveDoc] = useState(null);
-  const [showMembers, setShowMembers] = useState(false);
-  const [showReleases, setShowReleases] = useState(false);
-  const [showCreateProject, setShowCreateProject] = useState(false);
-  const [showInvite, setShowInvite] = useState(false);
-  const [showRelease, setShowRelease] = useState(false);
-  const [showShare, setShowShare] = useState(false);
-  const [activeRelease, setActiveRelease] = useState(null);
-  const [showReleaseView, setShowReleaseView] = useState(false);
-  const [showSubfolderModal, setShowSubfolderModal] = useState(false);
-  const [subfolderParentId, setSubfolderParentId] = useState(null);
-  const [renameDocModal, setRenameDocModal] = useState(false);
-  const [renameDocTitle, setRenameDocTitle] = useState('');
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [saveState, setSaveState] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [draftContent, setDraftContent] = useState([]);
-
-  // ─── Public Share View State ───
-  const [shareDoc, setShareDoc] = useState(null);
-  const [shareReleases, setShareReleases] = useState([]);
+  const [darkMode, setDarkMode] = useState(localStorage.getItem('docflow-theme') === 'dark');
 
   useEffect(() => {
-    const init = async () => {
-      const path = window.location.pathname;
-      if (path.startsWith('/invite/')) {
-        setInviteToken(path.replace('/invite/', ''));
-        setCurrentView('invite-accept');
-      } else if (path.startsWith('/share/')) {
-        const shareToken = path.replace('/share/', '');
-        try {
-          const res = await fetch(`/api/share/${shareToken}`);
-          if (res.ok) {
-            const data = await res.json();
-            setShareDoc(data);
-            setShareReleases(data.releases || []);
-            setCurrentView('share');
-          }
-        } catch (err) {
-          console.error('Failed to load shared document:', err);
-        }
-      }
-    };
-    init();
-  }, []);
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('docflow-theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('docflow-theme', 'light');
+    }
+  }, [darkMode]);
 
   const loadUser = useCallback(async () => {
     try {
       const data = await api.me();
-      if (data) {
-        setCurrentUser(data);
-        setProjects(data.projects || []);
-      }
+      if (data) setCurrentUser(data);
     } catch (err) {
       console.error('Failed to load user:', err);
-    }
-  }, []);
-
-  const loadDocuments = useCallback(async (projectId) => {
-    try {
-      const data = await api.projectDocuments(projectId);
-      if (data) setDocuments(data);
-    } catch (err) {
-      console.error('Failed to load documents:', err);
-    }
-  }, []);
-
-  const loadMembers = useCallback(async (projectId) => {
-    try {
-      const data = await api.projectMembers(projectId);
-      if (data) setMembers(data);
-    } catch (err) {
-      console.error('Failed to load members:', err);
     }
   }, []);
 
@@ -108,454 +45,616 @@ export default function App() {
     if (isLoggedIn) loadUser();
   }, [isLoggedIn, loadUser]);
 
-  useEffect(() => {
-    if (activeProject) {
-      loadDocuments(activeProject.project_id);
-      loadMembers(activeProject.project_id);
-    }
-  }, [activeProject, loadDocuments, loadMembers]);
-
   const handleLogin = async (username, password) => {
-    await api.login(username, password);
+    const res = await api.login(username, password);
+    if (res?.token) setToken(res.token);
   };
-
   const handleRegister = async (username, password, invitationToken) => {
-    await api.register(username, password, invitationToken);
+    const res = await api.register(username, password, invitationToken);
+    if (res?.token) setToken(res.token);
   };
-
-  const handleInviteAccept = async (token, username, email, password) => {
-    await api.acceptInvite(token, username, email, password);
-  };
-
   const handleLogout = () => {
     api.logout();
-    window.location.reload();
+    setToken(null);
+    window.location.href = '/';
   };
 
-  const handleCreateProject = async (name, description) => {
-    try {
-      await api.createProject(name, description);
-      await loadUser();
-      setShowCreateProject(false);
-    } catch (err) {
-      console.error('Failed to create project:', err);
-    }
-  };
-
-  const handleCreateDocument = async () => {
-    if (!activeProject) return;
-    try {
-      const doc = await api.createDocument(`Untitled Document`, activeProject.project_id);
-      await loadDocuments(activeProject.project_id);
-      setActiveDoc(doc);
-      setDraftContent([]);
-    } catch (err) {
-      console.error('Failed to create document:', err);
-    }
-  };
-
-  const handleDocSelect = async (doc) => {
-    setLoading(true);
-    try {
-      const data = await api.getDocument(doc.id);
-      if (data) {
-        setActiveDoc(data);
-        setDraftContent(data.content || []);
-      }
-    } catch (err) {
-      console.error('Failed to load document:', err);
-    }
-    setLoading(false);
-  };
-
-  const handleRenameDocument = async (newTitle) => {
-    if (!activeDoc) return;
-    try {
-      await api.updateDocument(activeDoc.id, { title: newTitle });
-      setActiveDoc(prev => ({ ...prev, title: newTitle }));
-      await loadDocuments(activeProject.project_id);
-      setRenameDocModal(false);
-    } catch (err) {
-      console.error('Failed to rename document:', err);
-    }
-  };
-
-  const handleDeleteDocument = async (docId) => {
-    if (!window.confirm('Are you sure you want to delete this document?')) return;
-    try {
-      await api.deleteDocument(docId);
-      await loadDocuments(activeProject.project_id);
-      if (activeDoc?.id === docId) {
-        setActiveDoc(null);
-        setDraftContent([]);
-      }
-    } catch (err) {
-      console.error('Failed to delete document:', err);
-    }
-  };
-
-  const handleCreateSubfolder = async (name, parentId) => {
-    if (!activeProject) return;
-    try {
-      await api.createFolder(name, activeProject.project_id, parentId || null);
-      setShowSubfolderModal(false);
-      setSubfolderParentId(null);
-      await loadDocuments(activeProject.project_id);
-    } catch (err) {
-      console.error('Failed to create folder:', err);
-    }
-  };
-
-  const handleEditorChange = useCallback(async (content) => {
-    if (!activeDoc) return;
-    setDraftContent(content);
-    // Debounced save logic could go here, but for now we'll just store in state
-    // and maybe save on blur or button click if auto-save is too aggressive
-  }, [activeDoc]);
-
-  const handleManualSave = async () => {
-    if (!activeDoc) return;
-    setSaveState(true);
-    try {
-      await api.updateDocument(activeDoc.id, { content: draftContent });
-      setTimeout(() => setSaveState(false), 2000);
-    } catch (err) {
-      console.error('Failed to save document:', err);
-      setSaveState(false);
-    }
-  };
-
-  const handlePublish = async (title, description) => {
-    if (!activeDoc) return;
-    try {
-      await api.createRelease(activeDoc.id, title, description);
-      setShowRelease(false);
-      // Optional: reload releases if panel is open
-    } catch (err) {
-      console.error('Failed to publish release:', err);
-    }
-  };
-
-  const handleToggleShare = async (isPublic) => {
-    if (!activeDoc) return;
-    try {
-      await api.shareDocument(activeDoc.id, isPublic);
-      setActiveDoc(prev => ({ ...prev, is_public: isPublic }));
-      setShowShare(false);
-    } catch (err) {
-      console.error('Failed to toggle share:', err);
-    }
-  };
-
-  const handleInviteMember = async (email, role) => {
-    if (!activeProject) return;
-    try {
-      await api.createInvite(activeProject.project_id, email, role);
-      setShowInvite(false);
-      alert('Invitation sent!');
-    } catch (err) {
-      console.error('Failed to create invite:', err);
-    }
-  };
-
-  const handleRemoveMember = async (userId) => {
-    if (!activeProject) return;
-    try {
-      await api.removeMember(activeProject.project_id, userId);
-      await loadMembers(activeProject.project_id);
-    } catch (err) {
-      console.error('Failed to remove member:', err);
-    }
-  };
-
-  const handleRoleChange = async (userId, role) => {
-    if (!activeProject) return;
-    try {
-      await api.updateMemberRole(activeProject.project_id, userId, role);
-      await loadMembers(activeProject.project_id);
-    } catch (err) {
-      console.error('Failed to change role:', err);
-    }
-  };
-
-  const handleViewRelease = async (release) => {
-    try {
-      const fullRelease = await api.getRelease(activeDoc.id, release.id);
-      setActiveRelease(fullRelease);
-      setShowReleaseView(true);
-    } catch (err) {
-      console.error('Failed to load release:', err);
-    }
-  };
-
-  const handleCopyDocument = async () => {
-    if (!activeDoc || !activeProject) return;
-    try {
-      const newDoc = await api.copyDocument(activeDoc.id, activeProject.project_id);
-      await loadDocuments(activeProject.project_id);
-      setActiveDoc(newDoc);
-    } catch (err) {
-      console.error('Failed to copy document:', err);
-    }
-  };
-
-  // ─── Render Logic ───
-
-  if (currentView === 'invite-accept') return <InviteAcceptScreen token={inviteToken} onAccept={handleInviteAccept} />;
-  if (!isLoggedIn) return <LoginScreen onLogin={handleLogin} />;
-  
-  if (currentView === 'share' && shareDoc) {
+  if (!isLoggedIn) {
     return (
-      <div className="h-screen flex flex-col bg-white">
-        <div className="h-12 border-b flex items-center px-4 gap-3">
-          <FileText size={20} className="text-blue-600" />
-          <span className="font-semibold">Docflow</span>
-          <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded ml-auto">Public View</span>
-        </div>
-        <div className="flex-1 overflow-y-auto p-8 max-w-4xl mx-auto w-full">
-          <h1 className="text-4xl font-bold mb-2">{shareDoc.title}</h1>
-          <div className="text-sm text-slate-500 mb-8 border-b pb-4">
-             By {shareDoc.author_name} · Updated {new Date(shareDoc.updated_at).toLocaleDateString()}
-          </div>
-          <BlockNoteEditor initialContent={shareDoc.content} editable={false} />
-          
-          <div className="mt-12 pt-8 border-t">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><GitCommit /> Releases</h2>
-            <div className="space-y-4">
-              {shareReleases.map(r => (
-                <div key={r.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                  <div className="font-bold">{r.title} <span className="text-xs font-normal text-slate-500 ml-2">v{r.version_number}</span></div>
-                  <div className="text-xs text-slate-500 mb-2">{new Date(r.created_at).toLocaleString()}</div>
-                  {r.description && <div className="text-sm text-slate-600">{r.description}</div>}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+      <Routes>
+        <Route path="/invite/:token" element={<InviteRoute onLogin={setToken} />} />
+        <Route path="/share/:token" element={<ShareView />} />
+        <Route path="*" element={<LoginScreen onLogin={handleLogin} />} />
+      </Routes>
     );
   }
-
-  if (!activeProject && projects.length === 0) {
-    return (
-      <div className="fixed inset-0 bg-slate-50 flex items-center justify-center p-4">
-        <div className="text-center max-w-sm">
-          <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-blue-200">
-            <Folder size={40} />
-          </div>
-          <h1 className="text-2xl font-bold text-slate-800 mb-2">Welcome to Docflow</h1>
-          <p className="text-slate-500 mb-8">Ready to streamline your documentation? Create your first project to begin.</p>
-          <button onClick={() => setShowCreateProject(true)}
-            className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
-            <Plus size={20} /> Create New Project
-          </button>
-        </div>
-        <CreateProjectModal visible={showCreateProject} onClose={() => setShowCreateProject(false)} onCreate={handleCreateProject} />
-      </div>
-    );
-  }
-
-  const userRole = activeProject?.role;
-  const canEdit = userRole === 'owner' || userRole === 'editor';
-  const isOwner = userRole === 'owner';
 
   return (
-    <div className="h-screen flex flex-col bg-slate-50 font-sans text-slate-900">
+    <div className="h-screen flex flex-col font-sans transition-colors duration-300" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-main)' }}>
       {/* Top Navigation */}
-      <nav className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-40">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md shadow-blue-100">
-              <FileText size={18} strokeWidth={2.5} />
+      <nav className="h-14 border-b flex items-center justify-between px-6 sticky top-0 z-40" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+        <div className="flex items-center gap-6">
+          <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white" style={{ backgroundColor: 'var(--primary)' }}>
+              <FileText size={16} strokeWidth={2.5} />
             </div>
             <span className="font-bold text-lg tracking-tight">Docflow</span>
-          </div>
-          
-          <div className="h-6 w-px bg-slate-200" />
-          
-          <div className="flex items-center gap-2 bg-slate-50 rounded-xl p-1 border border-slate-100">
-            <select
-              value={activeProject?.project_id || ''}
-              onChange={(e) => {
-                const proj = projects.find(p => p.project_id === e.target.value);
-                if (proj) { setActiveProject(proj); setActiveDoc(null); setDraftContent([]); }
-              }}
-              className="bg-transparent px-3 py-1 text-sm font-semibold focus:outline-none cursor-pointer"
-            >
-              {projects.map(p => (
-                <option key={p.project_id} value={p.project_id}>{p.name}</option>
-              ))}
-            </select>
-            <button onClick={() => setShowCreateProject(true)} className="p-1.5 hover:bg-white hover:shadow-sm rounded-lg transition-all text-slate-500 hover:text-blue-600" title="New Project">
-              <Plus size={16} />
-            </button>
-          </div>
+          </Link>
         </div>
 
-        <div className="flex items-center gap-2">
-          {activeDoc && (
-            <div className="flex items-center gap-1 bg-slate-50 rounded-xl p-1 border border-slate-100 mr-2">
-              <button onClick={() => { setShowMembers(!showMembers); setShowReleases(false); }}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-                  showMembers ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'
-                }`}>
-                <Users size={14} /> <span className="hidden sm:inline">Members</span>
-              </button>
-              <button onClick={() => { setShowReleases(!showReleases); setShowMembers(false); }}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-                  showReleases ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'
-                }`}>
-                <GitCommit size={14} /> <span className="hidden sm:inline">Releases</span>
-              </button>
-            </div>
-          )}
-          <div className="h-8 w-8 bg-slate-200 rounded-full flex items-center justify-center text-xs font-bold text-slate-600 border border-white shadow-sm cursor-pointer hover:ring-2 hover:ring-blue-100 transition-all">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg transition-colors" style={{ color: 'var(--text-muted)' }}>
+            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <div className="h-8 w-8 bg-gradient-to-tr from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-xs font-bold text-white">
             {currentUser?.username?.charAt(0).toUpperCase()}
           </div>
-          <button onClick={handleLogout} className="p-2 hover:bg-red-50 hover:text-red-600 rounded-xl transition-colors text-slate-400" title="Logout">
+          <button onClick={handleLogout} className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors" style={{ color: 'var(--text-muted)' }} title="Logout">
             <LogOut size={18} />
           </button>
         </div>
       </nav>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <aside className="w-72 bg-white border-r border-slate-100 flex flex-col flex-shrink-0 shadow-sm z-30">
-          <div className="p-4 flex items-center justify-between">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Workspace</h2>
-            <div className="flex gap-1">
-              <button onClick={handleCreateDocument} className="p-2 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg transition-all" title="New Document">
-                <Plus size={16} />
-              </button>
-              <button onClick={() => setShowSubfolderModal(true)} className="p-2 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg transition-all" title="New Folder">
-                <Folder size={16} />
-              </button>
+        <Routes>
+          <Route path="/" element={<Dashboard user={currentUser} onUserUpdate={loadUser} />} />
+          <Route path="/project/:projectId" element={<Workspace />} />
+          <Route path="/project/:projectId/folder/:folderId" element={<Workspace />} />
+          <Route path="/document/:docId" element={<EditorView />} />
+          <Route path="/share/:token" element={<ShareView />} />
+          <Route path="/invite/:token" element={<InviteRoute onLogin={setToken} />} />
+        </Routes>
+      </div>
+    </div>
+  );
+}
+
+function InviteRoute({ onLogin }) {
+  const { token } = useParams();
+  const navigate = useNavigate();
+  const handleAccept = async (t, username, email, password) => {
+    const res = await api.acceptInvite(t, username, email, password);
+    if (res?.token) {
+      onLogin(res.token);
+      navigate('/');
+    }
+  };
+  return <InviteAcceptScreen token={token} onAccept={handleAccept} />;
+}
+
+function Dashboard({ user, onUserUpdate }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const navigate = useNavigate();
+
+  const handleCreate = async (name, desc) => {
+    await api.createProject(name, desc);
+    setShowCreate(false);
+    onUserUpdate();
+  };
+
+  const handleDelete = async (e, projectId) => {
+    e.stopPropagation();
+    if (window.confirm("Delete project and all its contents? This cannot be undone.")) {
+      await api.deleteProject(projectId);
+      onUserUpdate();
+    }
+  };
+
+  return (
+    <main className="flex-1 overflow-y-auto p-10">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-extrabold">My Workspace</h1>
+        </div>
+        
+        {(!user?.projects || user.projects.length === 0) ? (
+          <div className="text-center p-20 affine-card">
+            <div className="w-24 h-24 bg-blue-50/10 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Folder size={48} />
             </div>
+            <h2 className="text-2xl font-bold mb-2">No projects yet</h2>
+            <p className="mb-8 max-w-sm mx-auto" style={{ color: 'var(--text-muted)' }}>Create your first project workspace to start organizing your SOPs.</p>
+            <button onClick={() => setShowCreate(true)} className="affine-button px-8 py-3 flex mx-auto items-center gap-2">
+              <Plus size={20} /> Create Project
+            </button>
           </div>
-          
-          <div className="flex-1 overflow-y-auto px-2 space-y-1">
-            {documents.length === 0 ? (
-              <div className="p-8 text-center text-slate-400">
-                <p className="text-sm">No documents found.</p>
-              </div>
-            ) : (
-              <>
-                {documents.filter(d => !d.folder_id).map(doc => (
-                  <div key={doc.id}
-                    onClick={() => handleDocSelect(doc)}
-                    className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all border border-transparent ${
-                      activeDoc?.id === doc.id 
-                        ? 'bg-blue-50 border-blue-100 text-blue-700 font-semibold shadow-sm' 
-                        : 'hover:bg-slate-50 text-slate-600'
-                    }`}>
-                    <FileText size={18} className={activeDoc?.id === doc.id ? 'text-blue-600' : 'text-slate-400'} />
-                    <span className="flex-1 truncate text-sm">{doc.title}</span>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                       <button onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc.id); }}
-                        className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded-md">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            <button onClick={() => setShowCreate(true)} 
+              className="group flex flex-col items-center justify-center h-48 border-2 border-dashed rounded-2xl transition-all hover:border-blue-500" style={{ borderColor: 'var(--border-color)' }}>
+              <Plus size={32} className="mb-3" style={{ color: 'var(--text-muted)' }} />
+              <span className="font-bold" style={{ color: 'var(--text-muted)' }}>New Project</span>
+            </button>
+            {user.projects.map(p => (
+              <div key={p.project_id} className="relative group cursor-pointer" onClick={() => navigate(`/project/${p.project_id}`)}>
+                <div className="flex flex-col h-48 affine-card p-6 text-left">
+                  <div className="flex justify-between items-start mb-auto">
+                    <Folder size={48} style={{ color: 'var(--primary)' }} className="group-hover:scale-105 transition-transform" />
+                    <span className="text-xs font-bold px-2 py-1 rounded" style={{ backgroundColor: 'var(--bg-hover)', color: 'var(--text-muted)' }}>{p.role}</span>
                   </div>
-                ))}
-              </>
-            )}
+                  <div>
+                    <h3 className="font-bold text-lg truncate mb-1">{p.name}</h3>
+                    <p className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>{p.description || 'Workspace'}</p>
+                  </div>
+                </div>
+                {p.role === 'owner' && (
+                  <button onClick={(e) => handleDelete(e, p.project_id)} 
+                    className="absolute top-4 right-4 p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all" style={{ backgroundColor: 'var(--bg-hover)' }}>
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
-        </aside>
+        )}
+      </div>
+      <CreateProjectModal visible={showCreate} onClose={() => setShowCreate(false)} onCreate={handleCreate} />
+    </main>
+  );
+}
 
-        {/* Editor Area */}
-        <main className="flex-1 flex flex-col bg-white overflow-hidden relative">
-          {activeDoc ? (
+function Workspace() {
+  const { projectId, folderId } = useParams();
+  const navigate = useNavigate();
+  const [project, setProject] = useState(null);
+  const [folders, setFolders] = useState([]);
+  const [docs, setDocs] = useState([]);
+  const [folderPath, setFolderPath] = useState([]); // This would ideally be fetched from API, but we'll infer it or keep it simple
+  
+  const [showFolderModal, setShowFolderModal] = useState(false);
+  const [showDocModal, setShowDocModal] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const p = await api.getProject(projectId);
+      setProject(p);
+
+      if (folderId) {
+        const flds = await api.subfolders(folderId);
+        const d = await api.projectDocuments(projectId, folderId);
+        setFolders(flds);
+        setDocs(d);
+        // Basic path inference if navigating directly. A real app needs an API to get full path.
+        if (folderPath.length === 0 || folderPath[folderPath.length-1].id !== folderId) {
+           // just fetch the current folder to at least show its name
+           // docflow doesn't have a getFolder endpoint, so breadcrumbs might be incomplete if deep linking.
+        }
+      } else {
+        const flds = await api.projectFolders(projectId);
+        const d = await api.projectDocuments(projectId);
+        setFolders(flds);
+        setDocs(d);
+        setFolderPath([]);
+      }
+    } catch (err) { console.error(err); }
+  }, [projectId, folderId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const handleCreateFolder = async (name) => {
+    await api.createFolder(name, projectId, folderId);
+    setShowFolderModal(false);
+    loadData();
+  };
+
+  const handleCreateDoc = async (title) => {
+    const doc = await api.createDocument(title, projectId, folderId);
+    setShowDocModal(false);
+    navigate(`/document/${doc.id}`);
+  };
+
+  const handleDeleteDoc = async (e, id) => {
+    e.stopPropagation();
+    if(window.confirm('Delete document?')) { await api.deleteDocument(id); loadData(); }
+  };
+
+  const handleDeleteFolder = async (e, id) => {
+    e.stopPropagation();
+    if(window.confirm('Delete folder?')) { await api.deleteFolder(id); loadData(); }
+  };
+
+  if (!project) return null;
+
+  const canEdit = project.role === 'owner' || project.role === 'editor';
+
+  return (
+    <main className="flex-1 overflow-y-auto p-10 relative">
+      <div className="max-w-7xl mx-auto">
+        {/* Breadcrumbs */}
+        <div className="flex items-center gap-2 mb-6 text-sm font-medium" style={{ color: 'var(--text-muted)' }}>
+          <Link to="/" className="hover:text-blue-500"><Home size={16} /></Link>
+          <ChevronRight size={16} />
+          <Link to={`/project/${projectId}`} className="hover:text-blue-500 font-bold" style={{ color: !folderId ? 'var(--text-main)' : '' }}>{project.name}</Link>
+          {folderId && (
             <>
-              <header className="px-8 pt-8 pb-4 flex items-center justify-between">
-                <div className="flex-1 max-w-3xl">
-                  <input
-                    type="text"
-                    value={activeDoc.title}
-                    onChange={(e) => setActiveDoc({ ...activeDoc, title: e.target.value })}
-                    onBlur={() => handleRenameDocument(activeDoc.title)}
-                    className="text-4xl font-extrabold text-slate-900 bg-transparent border-none focus:outline-none w-full placeholder:text-slate-200"
-                    placeholder="Document Title"
-                  />
-                  <div className="flex items-center gap-4 mt-2 text-xs text-slate-400 font-medium">
-                    <span className="flex items-center gap-1"><Eye size={12} /> {activeDoc.author_name}</span>
-                    <span className="flex items-center gap-1"><Clock size={12} /> Updated {new Date(activeDoc.updated_at).toLocaleDateString()}</span>
-                    {saveState && <span className="text-green-600 flex items-center gap-1 font-bold animate-pulse"><Check size={12} /> Auto-saved</span>}
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <button onClick={handleManualSave} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-sm font-bold shadow-lg shadow-slate-200 hover:bg-slate-800 transition-all flex items-center gap-2">
-                    Save Changes
-                  </button>
-                  {isOwner && (
-                    <button onClick={() => setShowShare(true)}
-                      className={`p-2.5 rounded-xl border transition-all ${
-                        activeDoc.is_public ? 'bg-green-50 border-green-200 text-green-600 shadow-sm shadow-green-100' : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'
-                      }`}>
-                      {activeDoc.is_public ? <Unlock size={18} /> : <Lock size={18} />}
-                    </button>
-                  )}
-                  <button onClick={handleCopyDocument} className="p-2.5 rounded-xl border border-slate-200 text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-all">
-                    <Copy size={18} />
-                  </button>
-                </div>
-              </header>
-
-              <div className="flex-1 px-8 py-4 overflow-y-auto">
-                <div className="max-w-4xl mx-auto h-full">
-                  <BlockNoteEditor 
-                    initialContent={draftContent} 
-                    onChange={handleEditorChange}
-                    editable={canEdit}
-                  />
-                </div>
-              </div>
+              <ChevronRight size={16} />
+              <span style={{ color: 'var(--text-main)' }}>Subfolder</span>
             </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-300 p-12">
-              <div className="w-32 h-32 bg-slate-50 rounded-full flex items-center justify-center mb-8 border border-slate-100 shadow-inner">
-                <FileText size={64} strokeWidth={1} />
-              </div>
-              <h3 className="text-xl font-bold text-slate-400 mb-2">No Document Selected</h3>
-              <p className="text-sm text-slate-400 max-w-xs text-center">Pick a document from the sidebar or create a new one to start working on your flow.</p>
-              <button onClick={handleCreateDocument} className="mt-8 px-6 py-3 bg-white border-2 border-slate-100 text-slate-600 rounded-2xl font-bold hover:border-blue-200 hover:text-blue-600 transition-all flex items-center gap-2 shadow-sm">
-                <Plus size={18} /> Create New Document
+          )}
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+          <h1 className="text-3xl font-extrabold">{folderId ? 'Folder Contents' : project.name}</h1>
+          {canEdit && (
+            <div className="flex gap-3">
+              <button onClick={() => setShowFolderModal(true)} className="affine-button-outline px-4 py-2 flex items-center gap-2">
+                <Folder size={18} /> New Folder
+              </button>
+              <button onClick={() => setShowDocModal(true)} className="affine-button px-4 py-2 flex items-center gap-2">
+                <FileText size={18} /> New Document
               </button>
             </div>
           )}
-        </main>
+        </div>
 
-        {/* Right Panels */}
-        {showMembers && (
-          <MembersPanel
-            members={members}
-            userRole={userRole}
-            onRemoveMember={handleRemoveMember}
-            onRoleChange={handleRoleChange}
-            onInvite={() => setShowInvite(true)}
-          />
-        )}
-        {showReleases && activeDoc && (
-          <ReleasePanel
-            releases={[]} // Need to implement fetchReleases
-            userRole={userRole}
-            onViewRelease={handleViewRelease}
-            onOpenPublish={() => setShowRelease(true)}
-          />
+        {folders.length === 0 && docs.length === 0 ? (
+          <div className="text-center p-20 border-2 border-dashed rounded-2xl" style={{ borderColor: 'var(--border-color)' }}>
+             <p style={{ color: 'var(--text-muted)' }}>This folder is empty.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            {folders.map(f => (
+              <div key={f.id} className="relative group cursor-pointer" onClick={() => {
+                setFolderPath([...folderPath, f]);
+                navigate(`/project/${projectId}/folder/${f.id}`);
+              }}>
+                <div className="flex flex-col h-40 affine-card p-6 text-left">
+                  <Folder size={40} style={{ color: '#60a5fa' }} className="mb-auto group-hover:scale-105 transition-transform" />
+                  <h3 className="font-bold truncate">{f.name}</h3>
+                </div>
+                {canEdit && (
+                  <button onClick={(e) => handleDeleteFolder(e, f.id)} 
+                    className="absolute top-4 right-4 p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all" style={{ backgroundColor: 'var(--bg-hover)' }}>
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {docs.map(d => (
+              <div key={d.id} className="relative group cursor-pointer" onClick={() => navigate(`/document/${d.id}`)}>
+                <div className="flex flex-col h-40 affine-card p-6 text-left">
+                  <div className="flex justify-between items-start mb-auto">
+                    <FileText size={40} style={{ color: '#818cf8' }} className="group-hover:scale-105 transition-transform" />
+                    {d.is_public && <Eye size={16} className="text-green-500" title="Publically Shared" />}
+                  </div>
+                  <div>
+                    <h3 className="font-bold truncate mb-1">{d.title}</h3>
+                    <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>Updated {new Date(d.updated_at).toLocaleDateString()}</p>
+                  </div>
+                </div>
+                {canEdit && (
+                  <button onClick={(e) => handleDeleteDoc(e, d.id)} 
+                    className="absolute top-4 right-4 p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all" style={{ backgroundColor: 'var(--bg-hover)' }}>
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
+      <SubfolderModal visible={showFolderModal} onClose={() => setShowFolderModal(false)} onSubmit={handleCreateFolder} parentId={folderId} />
+      <RenameModal visible={showDocModal} title="New Document Title" initialValue="" onClose={() => setShowDocModal(false)} onSubmit={handleCreateDoc} />
+    </main>
+  );
+}
 
-      {/* Modals */}
-      <CreateProjectModal visible={showCreateProject} onClose={() => setShowCreateProject(false)} onCreate={handleCreateProject} />
-      <ReleaseModal visible={showRelease} onClose={() => setShowRelease(false)} onSave={handlePublish} />
-      <ShareModal visible={showShare} onClose={() => setShowShare(false)} 
-        isPublic={activeDoc?.is_public} onToggleShare={handleToggleShare}
-        shareUrl={activeDoc ? `${window.location.origin}/share/${activeDoc.public_token}` : ''} />
-      <InviteModal visible={showInvite} onClose={() => setShowInvite(false)} onInvite={handleInviteMember} />
-      <RenameModal visible={renameDocModal} title="Rename Document" initialValue={renameDocTitle} onClose={() => setRenameDocModal(false)} onSubmit={handleRenameDocument} />
-      <SubfolderModal visible={showSubfolderModal} onClose={() => setShowSubfolderModal(false)} onSubmit={handleCreateSubfolder} parentId={subfolderParentId} />
-      <ReleaseViewModal release={activeRelease} onClose={() => setShowReleaseView(false)} />
+function EditorView() {
+  const { docId } = useParams();
+  const navigate = useNavigate();
+  const [doc, setDoc] = useState(null);
+  const [project, setProject] = useState(null);
+  const [releases, setReleases] = useState([]);
+  const [members, setMembers] = useState([]);
+  
+  const [draftContent, setDraftContent] = useState([]);
+  const [saveState, setSaveState] = useState(false);
+  const saveTimeoutRef = useRef(null);
+
+  const [showMembers, setShowMembers] = useState(false);
+  const [showReleases, setShowReleases] = useState(false);
+  const [showReleaseModal, setShowReleaseModal] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [activeRelease, setActiveRelease] = useState(null);
+  const [showReleaseView, setShowReleaseView] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const d = await api.getDocument(docId);
+      setDoc(d);
+      setDraftContent(d.content || []);
+      
+      const p = await api.getProject(d.project_id);
+      setProject(p);
+      
+      const r = await api.getDocumentReleases(docId);
+      setReleases(r);
+
+      const m = await api.projectMembers(d.project_id);
+      setMembers(m);
+    } catch (err) { console.error(err); }
+  }, [docId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const handleEditorChange = useCallback(async (content) => {
+    if (!doc) return;
+    setDraftContent(content);
+    
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(async () => {
+      setSaveState(true);
+      try {
+        await api.updateDocument(doc.id, { content });
+        setDoc(prev => ({ ...prev, updated_at: new Date().toISOString() }));
+        setTimeout(() => setSaveState(false), 2000);
+      } catch (err) { setSaveState(false); }
+    }, 1500);
+  }, [doc]);
+
+  const handlePublishRelease = async (title, desc) => {
+    await api.createRelease(doc.id, title, desc);
+    setShowReleaseModal(false);
+    const r = await api.getDocumentReleases(docId);
+    setReleases(r);
+    // Reload doc to get updated public_token if it was set
+    const updatedDoc = await api.getDocument(docId);
+    setDoc(updatedDoc);
+    alert('Changes committed and pushed successfully!');
+  };
+
+  const handleToggleShare = async (isPublic) => {
+    const updated = await api.shareDocument(doc.id, isPublic);
+    // update is_public and public_token from the result
+    setDoc(prev => ({ ...prev, is_public: updated.is_public, public_token: updated.public_token }));
+    setShowShare(false);
+  };
+
+  if (!doc || !project) return null;
+
+  const canEdit = project.role === 'owner' || project.role === 'editor';
+  const isOwner = project.role === 'owner';
+
+  return (
+    <>
+      <main className="flex-1 flex flex-col overflow-hidden relative" style={{ backgroundColor: 'var(--bg-main)' }}>
+        <header className="px-8 py-4 flex items-center justify-between border-b" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-card)' }}>
+          <div className="flex items-center gap-4">
+            <button onClick={() => navigate(doc.folder_id ? `/project/${doc.project_id}/folder/${doc.folder_id}` : `/project/${doc.project_id}`)} 
+              className="p-2 rounded-xl transition-colors" style={{ color: 'var(--text-muted)' }}>
+              <ChevronLeft size={24} />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold leading-none mb-1">{doc.title}</h1>
+              <div className="flex items-center gap-3 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                <span className="flex items-center gap-1"><Clock size={12} /> Draft updated {new Date(doc.updated_at).toLocaleTimeString()}</span>
+                {saveState && <span className="text-blue-500 flex items-center gap-1 font-bold animate-pulse"><Loader2 size={12} className="animate-spin" /> Saving...</span>}
+                {!saveState && <span className="text-green-500 flex items-center gap-1 font-bold"><Check size={12} /> Saved to cloud</span>}
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3">
+             <div className="flex items-center gap-1 rounded-lg p-1 mr-2" style={{ backgroundColor: 'var(--bg-hover)' }}>
+                <button onClick={() => { setShowMembers(!showMembers); setShowReleases(false); }}
+                  className="px-3 py-1.5 text-sm font-bold rounded-md transition-all flex items-center gap-2"
+                  style={{ 
+                    backgroundColor: showMembers ? 'var(--bg-card)' : 'transparent',
+                    color: showMembers ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: showMembers ? 'var(--shadow-sm)' : 'none'
+                  }}>
+                  <Users size={16} /> Team
+                </button>
+                <button onClick={() => { setShowReleases(!showReleases); setShowMembers(false); }}
+                  className="px-3 py-1.5 text-sm font-bold rounded-md transition-all flex items-center gap-2"
+                  style={{ 
+                    backgroundColor: showReleases ? 'var(--bg-card)' : 'transparent',
+                    color: showReleases ? 'var(--primary)' : 'var(--text-muted)',
+                    boxShadow: showReleases ? 'var(--shadow-sm)' : 'none'
+                  }}>
+                  <GitCommit size={16} /> Changelog
+                </button>
+              </div>
+
+            {isOwner && (
+              <button onClick={() => setShowShare(true)}
+                className={`affine-button-outline px-4 py-2 text-sm flex items-center gap-2 ${
+                  doc.is_public ? 'border-green-500 text-green-600' : ''
+                }`}>
+                {doc.is_public ? <><Unlock size={16} /> Shared</> : <><Lock size={16} /> Share</>}
+              </button>
+            )}
+            {canEdit && (
+              <button onClick={() => setShowReleaseModal(true)} className="affine-button px-5 py-2 text-sm flex items-center gap-2">
+                <GitCommit size={16} /> Commit & Push
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--bg-main)' }}>
+          <div className="max-w-4xl mx-auto px-12 pt-6 pb-16">
+            <div className="border px-4 py-3 rounded-xl mb-8 flex items-center gap-3 text-sm font-medium" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', borderColor: 'rgba(245, 158, 11, 0.2)', color: '#d97706' }}>
+              <FileText size={18} />
+              You are editing the Draft version. Public viewers will not see these changes until you "Commit & Push".
+            </div>
+            <div className="rounded-2xl px-10 py-10" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+              <BlockNoteEditor 
+                initialContent={draftContent} 
+                onChange={handleEditorChange}
+                editable={canEdit}
+              />
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {showMembers && (
+        <MembersPanel members={members} userRole={project.role} onRemoveMember={() => {}} onRoleChange={() => {}} onInvite={() => setShowInvite(true)} />
+      )}
+      {showReleases && (
+        <ReleasePanel releases={releases} userRole={project.role} onViewRelease={(r) => { setActiveRelease(r); setShowReleaseView(true); }} onOpenPublish={() => setShowReleaseModal(true)} />
+      )}
+
+      <ReleaseModal visible={showReleaseModal} onClose={() => setShowReleaseModal(false)} onSave={handlePublishRelease} />
+      <ShareModal visible={showShare} onClose={() => setShowShare(false)} isPublic={doc.is_public} onToggleShare={handleToggleShare} shareUrl={doc ? `${window.location.origin}/share/${doc.public_token}` : ''} />
+      <InviteModal visible={showInvite} onClose={() => setShowInvite(false)} onInvite={() => {}} />
+      <ReleaseViewModal release={activeRelease} visible={showReleaseView} onClose={() => setShowReleaseView(false)} />
+    </>
+  );
+}
+
+function ShareView() {
+  const { token } = useParams();
+  const [doc, setDoc] = useState(null);
+  const [releases, setReleases] = useState([]);
+  const [selectedRelease, setSelectedRelease] = useState(null); // null = latest published
+  const [darkMode, setDarkMode] = useState(localStorage.getItem('docflow-theme') === 'dark');
+
+  useEffect(() => {
+    if (darkMode) { document.documentElement.classList.add('dark'); } 
+    else { document.documentElement.classList.remove('dark'); }
+  }, [darkMode]);
+
+  useEffect(() => {
+    fetch(`/api/share/${token}`)
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error) {
+          setDoc(data);
+          setReleases(data.releases || []);
+        }
+      });
+  }, [token]);
+
+  if (!doc) return <div className="p-10 text-center" style={{ color: 'var(--text-muted)' }}>Loading...</div>;
+
+  // The content shown is either a specific release snapshot or the latest published content
+  const displayContent = selectedRelease
+    ? (typeof selectedRelease.content === 'string' ? JSON.parse(selectedRelease.content) : selectedRelease.content)
+    : doc.content;
+  const displayTitle = doc.title;
+
+  return (
+    <div className="h-screen flex flex-col w-full" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-main)' }}>
+      {/* Top bar */}
+      <div className="h-14 border-b flex items-center px-6 gap-3 sticky top-0 z-40 flex-shrink-0" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white" style={{ backgroundColor: 'var(--primary)' }}>
+          <FileText size={16} strokeWidth={2.5} />
+        </div>
+        <span className="font-bold text-lg">Docflow</span>
+        {selectedRelease && (
+          <span className="ml-2 text-xs font-bold px-2 py-1 rounded" style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: '#d97706' }}>
+            Viewing: {selectedRelease.title} (v{selectedRelease.version_number})
+          </span>
+        )}
+        <button onClick={() => setDarkMode(!darkMode)} className="ml-auto p-2 rounded-lg transition-colors" style={{ color: 'var(--text-muted)' }}>
+          {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
+        <span className="text-xs font-bold px-2 py-1 rounded flex items-center gap-1" style={{ backgroundColor: 'rgba(30,150,235,0.1)', color: 'var(--primary)' }}>
+          <Eye size={14} /> SOP View
+        </span>
+      </div>
+
+      <div className="flex-1 flex overflow-hidden">
+        {/* Document */}
+        <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--bg-main)' }}>
+          <div className="max-w-4xl mx-auto px-8 py-10">
+            <div className="rounded-2xl px-10 py-10" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+              <h1 className="text-4xl font-extrabold mb-4" style={{ color: 'var(--text-main)' }}>{displayTitle}</h1>
+              <div className="text-sm font-medium mb-8 pb-6 border-b flex flex-wrap items-center gap-2" style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}>
+                <span>Published by {doc.author_name}</span>
+                <span>·</span>
+                <span>Last updated {new Date(doc.updated_at).toLocaleDateString()}</span>
+                {selectedRelease && (
+                  <>
+                    <span>·</span>
+                    <span className="font-bold" style={{ color: '#d97706' }}>Snapshot: {selectedRelease.title}</span>
+                    <button
+                      onClick={() => setSelectedRelease(null)}
+                      className="ml-2 text-xs px-2 py-0.5 rounded-lg font-bold"
+                      style={{ backgroundColor: 'rgba(30,150,235,0.1)', color: 'var(--primary)' }}
+                    >
+                      View Latest
+                    </button>
+                  </>
+                )}
+              </div>
+              <BlockNoteEditor initialContent={displayContent} editable={false} key={selectedRelease?.id || 'latest'} />
+            </div>
+          </div>
+        </div>
+
+        {/* Changelog sidebar */}
+        <div className="w-80 border-l flex flex-col flex-shrink-0" style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-color)' }}>
+          <div className="px-5 pt-5 pb-3 border-b flex-shrink-0" style={{ borderColor: 'var(--border-color)' }}>
+            <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--text-main)' }}>
+              <GitCommit size={16} style={{ color: 'var(--primary)' }} /> Changelog History
+            </h2>
+            {selectedRelease && (
+              <button onClick={() => setSelectedRelease(null)} className="mt-2 text-xs font-bold" style={{ color: 'var(--primary)' }}>
+                ← Back to latest
+              </button>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto p-5 space-y-2">
+            {/* Latest / current entry */}
+            <button
+              onClick={() => setSelectedRelease(null)}
+              className="w-full text-left px-3 py-3 rounded-xl transition-colors"
+              style={{
+                backgroundColor: !selectedRelease ? 'rgba(30,150,235,0.1)' : 'transparent',
+                border: !selectedRelease ? '1px solid rgba(30,150,235,0.2)' : '1px solid transparent',
+              }}
+              onMouseEnter={e => { if (selectedRelease) e.currentTarget.style.backgroundColor = 'var(--bg-hover)'; }}
+              onMouseLeave={e => { if (selectedRelease) e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: !selectedRelease ? 'var(--primary)' : 'var(--text-muted)' }} />
+                <span className="text-sm font-bold" style={{ color: 'var(--text-main)' }}>Latest Published</span>
+              </div>
+            </button>
+
+            {/* Divider */}
+            {releases.length > 0 && (
+              <p className="text-xs font-bold pt-2 pb-1" style={{ color: 'var(--text-muted)' }}>Previous versions</p>
+            )}
+
+            {releases.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setSelectedRelease(r)}
+                className="w-full text-left px-3 py-3 rounded-xl transition-colors"
+                style={{
+                  backgroundColor: selectedRelease?.id === r.id ? 'rgba(30,150,235,0.1)' : 'transparent',
+                  border: selectedRelease?.id === r.id ? '1px solid rgba(30,150,235,0.2)' : '1px solid transparent',
+                }}
+                onMouseEnter={e => { if (selectedRelease?.id !== r.id) e.currentTarget.style.backgroundColor = 'var(--bg-hover)'; }}
+                onMouseLeave={e => { if (selectedRelease?.id !== r.id) e.currentTarget.style.backgroundColor = 'transparent'; }}
+              >
+                <div className="flex items-start gap-2">
+                  <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: selectedRelease?.id === r.id ? 'var(--primary)' : 'var(--text-muted)' }} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-sm font-bold truncate" style={{ color: 'var(--text-main)' }}>{r.title}</span>
+                      <span className="text-xs font-mono ml-2 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>v{r.version_number}</span>
+                    </div>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{r.author} · {new Date(r.created_at).toLocaleDateString()}</p>
+                    {r.description && (
+                      <p className="text-xs mt-1.5 truncate" style={{ color: 'var(--text-muted)' }}>{r.description}</p>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
+
+            {releases.length === 0 && (
+              <p className="text-sm text-center py-6" style={{ color: 'var(--text-muted)' }}>No previous versions</p>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

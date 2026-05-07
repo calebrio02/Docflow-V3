@@ -151,7 +151,7 @@ export const api = {
   deleteFolder: (id) => request(`/folders/${id}`, { method: 'DELETE' }),
 
   // ─── Documents ───
-  projectDocuments: (projectId) => request(`/projects/${projectId}/documents`),
+  projectDocuments: (projectId, folderId) => request(`/projects/${projectId}/documents${folderId ? `?folderId=${folderId}` : ''}`),
 
   getDocument: (id) => request(`/documents/${id}`),
 
