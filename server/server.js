@@ -2,11 +2,15 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'docflow-jwt-secret-2025-change-in-production';
+const JWT_EXPIRES = '7d';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -63,6 +67,13 @@ async function runMigrations(client) {
     DO $$ BEGIN
       IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email') THEN
         ALTER TABLE users ADD COLUMN email VARCHAR(255);
+      END IF;
+    END $$;
+  `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='is_admin') THEN
+        ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT false;
       END IF;
     END $$;
   `);
@@ -168,7 +179,10 @@ async function initDB() {
   const adminExists = await pool.query('SELECT 1 FROM users WHERE username = $1', ['admin']);
   if (adminExists.rows.length === 0) {
     const hash = await bcrypt.hash('admin123', 10);
-    await pool.query('INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3)', ['admin', 'admin@docflow.local', hash]);
+    await pool.query('INSERT INTO users (username, email, password_hash, is_admin) VALUES ($1, $2, $3, true)', ['admin', 'admin@docflow.local', hash]);
+  } else {
+    // Ensure existing admin user has is_admin=true
+    await pool.query('UPDATE users SET is_admin = true WHERE username = $1', ['admin']);
   }
 
   console.log('Database initialized successfully');
@@ -179,20 +193,20 @@ function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'No token' });
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
-  
-  // Basic token validation (should be replaced with JWT in the future)
-  const expectedToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
-  if (!token || token !== expectedToken) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
 
-  const userIdHeader = req.headers['x-user-id'];
-  if (!userIdHeader) {
-    return res.status(401).json({ error: 'X-User-Id header required' });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.userId = payload.userId;
+    req.username = payload.username;
+    req.isAdmin = payload.isAdmin || false;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
+}
 
-  req.userId = parseInt(userIdHeader);
-  req.username = req.headers['x-username'] || 'unknown';
+function adminMiddleware(req, res, next) {
+  if (!req.isAdmin) return res.status(403).json({ error: 'Admin access required' });
   next();
 }
 
@@ -218,12 +232,18 @@ app.post('/api/auth/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const authToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
+    const token = jwt.sign(
+      { userId: user.id, username: user.username, isAdmin: user.is_admin || false },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES }
+    );
+
     res.json({
-      token: authToken,
+      token,
       userId: user.id,
       username: user.username,
       email: user.email,
+      isAdmin: user.is_admin || false,
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -234,72 +254,69 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/auth/register', async (req, res) => {
   const { username, email, password, invitationToken } = req.body;
   try {
-    if (invitationToken) {
-      const invite = await pool.query(
-        `SELECT * FROM invitations WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()`,
-        [invitationToken]
-      );
-      if (invite.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired invitation' });
+    if (!invitationToken) {
+      return res.status(403).json({ error: 'Registration requires an invitation link' });
+    }
 
-      const inv = invite.rows[0];
-      const exists = await pool.query('SELECT 1 FROM users WHERE email = $1', [inv.email]);
-      if (exists.rows.length > 0) return res.status(400).json({ error: 'User already registered with this email' });
+    const invite = await pool.query(
+      `SELECT * FROM invitations WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()`,
+      [invitationToken]
+    );
+    if (invite.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired invitation' });
 
-      const hash = await bcrypt.hash(password, 10);
-      const result = await pool.query(
-        `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email, created_at`,
-        [username, inv.email, hash]
-      );
-      const user = result.rows[0];
+    const inv = invite.rows[0];
+    const emailToUse = inv.email || email;
+    if (!emailToUse) return res.status(400).json({ error: 'Email required' });
 
+    const exists = await pool.query('SELECT 1 FROM users WHERE username = $1 OR email = $2', [username, emailToUse]);
+    if (exists.rows.length > 0) return res.status(400).json({ error: 'Username or email already taken' });
+
+    const hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email`,
+      [username, emailToUse, hash]
+    );
+    const user = result.rows[0];
+
+    // Mark invitation as used
+    await pool.query(`UPDATE invitations SET used_at = NOW() WHERE token = $1`, [invitationToken]);
+
+    // If invite has a project, add user to it
+    if (inv.project_id) {
       await pool.query(
-        `UPDATE invitations SET used_at = NOW() WHERE token = $1`,
-        [invitationToken]
-      );
-
-      const authToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
-      await pool.query(
-        `INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3)`,
+        `INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
         [inv.project_id, user.id, inv.role]
       );
-
-      res.status(201).json({
-        token: authToken,
-        userId: user.id,
-        username: user.username,
-        email: user.email,
-      });
-    } else {
-      const hash = await bcrypt.hash(password, 10);
-      const result = await pool.query(
-        `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email, created_at`,
-        [username, email, hash]
-      );
-      const user = result.rows[0];
-      const authToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
-      res.status(201).json({
-        token: authToken,
-        userId: user.id,
-        username: user.username,
-        email: user.email,
-      });
     }
+
+    const token = jwt.sign(
+      { userId: user.id, username: user.username, isAdmin: false },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES }
+    );
+
+    res.status(201).json({ token, userId: user.id, username: user.username, email: user.email, isAdmin: false });
   } catch (err) {
-    if (err.code === '23505') return res.status(400).json({ error: 'Username already exists' });
+    if (err.code === '23505') return res.status(400).json({ error: 'Username or email already taken' });
+    console.error('Register error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, username, email, created_at FROM users WHERE id = $1', [req.userId]);
+    const result = await pool.query('SELECT id, username, email, is_admin, created_at FROM users WHERE id = $1', [req.userId]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
     const user = result.rows[0];
 
     const projectsResult = await pool.query(
-      `SELECT pm.project_id, pm.role, p.name FROM project_members pm
-       JOIN projects p ON pm.project_id = p.id
-       WHERE pm.user_id = $1 ORDER BY p.name`,
+      `SELECT p.id as project_id, CASE WHEN u.is_admin THEN 'owner' ELSE pm.role END as role,
+              p.name, p.description
+       FROM projects p
+       LEFT JOIN project_members pm ON p.id = pm.project_id AND pm.user_id = $1
+       JOIN users u ON u.id = $1
+       WHERE u.is_admin = true OR pm.user_id = $1
+       ORDER BY p.name`,
       [req.userId]
     );
 
@@ -307,10 +324,75 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       id: user.id,
       username: user.username,
       email: user.email,
+      isAdmin: user.is_admin || false,
       projects: projectsResult.rows,
     });
   } catch (err) {
-    console.error('Login error:', err);
+    console.error('me error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── Admin: User Management ───
+app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, username, email, is_admin, created_at FROM users ORDER BY created_at ASC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  const targetId = parseInt(req.params.id);
+  if (targetId === req.userId) return res.status(400).json({ error: 'Cannot delete yourself' });
+  try {
+    await pool.query('DELETE FROM users WHERE id = $1', [targetId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Admin: Create a signup invite link (no project required, just gives platform access)
+app.post('/api/admin/invite', authMiddleware, adminMiddleware, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  try {
+    const token = uuidv4();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    // project_id is NULL for platform-level invites
+    const result = await pool.query(
+      `INSERT INTO invitations (email, project_id, role, token, expires_at, created_by)
+       VALUES ($1, NULL, 'viewer', $2, $3, $4) RETURNING *`,
+      [email, token, expiresAt, req.userId]
+    );
+
+    const origin = req.headers.origin || `http://localhost:${PORT}`;
+    res.status(201).json({
+      ...result.rows[0],
+      invitationLink: `${origin}/invite/${token}`,
+    });
+  } catch (err) {
+    console.error('Admin invite error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Admin: list all invitations
+app.get('/api/admin/invitations', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT i.*, u.username as created_by_name FROM invitations i
+       LEFT JOIN users u ON i.created_by = u.id
+       ORDER BY i.created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -357,32 +439,41 @@ app.post('/api/invitations/accept', async (req, res) => {
     if (invite.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired invitation' });
 
     const inv = invite.rows[0];
+    const emailToUse = inv.email || email;
+    if (!emailToUse) return res.status(400).json({ error: 'Email required' });
+
     const hash = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email, created_at`,
-      [username, email, hash]
+      `INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id, username, email`,
+      [username, emailToUse, hash]
     );
     const user = result.rows[0];
 
-    await pool.query(
-      `UPDATE invitations SET used_at = NOW() WHERE token = $1`,
-      [token]
+    await pool.query(`UPDATE invitations SET used_at = NOW() WHERE token = $1`, [token]);
+
+    if (inv.project_id) {
+      await pool.query(
+        `INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [inv.project_id, user.id, inv.role]
+      );
+    }
+
+    const jwtToken = jwt.sign(
+      { userId: user.id, username: user.username, isAdmin: false },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES }
     );
 
-    await pool.query(
-      `INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3)`,
-      [inv.project_id, user.id, inv.role]
-    );
-
-    const authToken = process.env.AUTH_TOKEN || 'docflow-secret-token';
     res.status(201).json({
-      token: authToken,
+      token: jwtToken,
       userId: user.id,
       username: user.username,
       email: user.email,
+      isAdmin: false,
     });
   } catch (err) {
-    if (err.code === '23505') return res.status(400).json({ error: 'Username already exists' });
+    if (err.code === '23505') return res.status(400).json({ error: 'Username or email already taken' });
+    console.error('Accept invite error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -390,15 +481,27 @@ app.post('/api/invitations/accept', async (req, res) => {
 // ─── Projects ───
 app.get('/api/projects', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT p.*, pm.role FROM projects p
-       JOIN project_members pm ON p.id = pm.project_id
-       WHERE pm.user_id = $1 ORDER BY p.name`,
-      [req.userId]
-    );
+    // Admins see all projects
+    const isAdminCheck = await pool.query('SELECT is_admin FROM users WHERE id = $1', [req.userId]);
+    const isAdmin = isAdminCheck.rows[0]?.is_admin;
+
+    let result;
+    if (isAdmin) {
+      result = await pool.query(
+        `SELECT p.*, 'owner' as role FROM projects p ORDER BY p.name`,
+        []
+      );
+    } else {
+      result = await pool.query(
+        `SELECT p.*, pm.role FROM projects p
+         JOIN project_members pm ON p.id = pm.project_id
+         WHERE pm.user_id = $1 ORDER BY p.name`,
+        [req.userId]
+      );
+    }
     res.json(result.rows);
   } catch (err) {
-    console.error('Login error:', err);
+    console.error('projects list error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -429,15 +532,26 @@ app.post('/api/projects', authMiddleware, async (req, res) => {
 
 app.get('/api/projects/:id', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT p.*, pm.role FROM projects p JOIN project_members pm ON p.id = pm.project_id
-       WHERE p.id = $1 AND pm.user_id = $2`,
-      [req.params.id, req.userId]
-    );
+    const isAdminCheck = await pool.query('SELECT is_admin FROM users WHERE id = $1', [req.userId]);
+    const isAdmin = isAdminCheck.rows[0]?.is_admin;
+
+    let result;
+    if (isAdmin) {
+      result = await pool.query(
+        `SELECT p.*, 'owner' as role FROM projects p WHERE p.id = $1`,
+        [req.params.id]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT p.*, pm.role FROM projects p JOIN project_members pm ON p.id = pm.project_id
+         WHERE p.id = $1 AND pm.user_id = $2`,
+        [req.params.id, req.userId]
+      );
+    }
     if (result.rows.length === 0) return res.status(404).json({ error: 'Project not found' });
     res.json(result.rows[0]);
   } catch (err) {
-    console.error('Login error:', err);
+    console.error('get project error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });

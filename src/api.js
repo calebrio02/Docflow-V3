@@ -1,11 +1,5 @@
 const API_BASE = '/api';
 let token = localStorage.getItem('docflow-token') || '';
-let userId = localStorage.getItem('docflow-userId') || '';
-
-// Restore userId from localStorage if we have a token but no userId in memory
-if (token && !userId) {
-  userId = localStorage.getItem('docflow-userId') || '';
-}
 
 async function request(path, opts = {}) {
   const headers = {
@@ -13,14 +7,7 @@ async function request(path, opts = {}) {
     Authorization: `Bearer ${token}`,
   };
 
-  if (userId) {
-    headers['X-User-Id'] = userId;
-  }
-
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...opts,
-    headers,
-  });
+  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
 
   if (res.status === 401) {
     token = '';
@@ -30,7 +17,6 @@ async function request(path, opts = {}) {
   }
 
   if (res.status === 204) return { success: true };
-
   return res.json();
 }
 
@@ -42,10 +28,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     }).then((r) => {
-      token = r.token;
-      userId = r.userId;
-      localStorage.setItem('docflow-token', token);
-      localStorage.setItem('docflow-userId', userId);
+      if (r?.token) {
+        token = r.token;
+        localStorage.setItem('docflow-token', token);
+        if (r.isAdmin !== undefined) localStorage.setItem('docflow-isAdmin', String(r.isAdmin));
+      }
       return r;
     }),
 
@@ -55,10 +42,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, invitationToken }),
     }).then((r) => {
-      token = r.token;
-      userId = r.userId;
-      localStorage.setItem('docflow-token', token);
-      localStorage.setItem('docflow-userId', userId);
+      if (r?.token) {
+        token = r.token;
+        localStorage.setItem('docflow-token', token);
+      }
       return r;
     }),
 
@@ -68,24 +55,30 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: inviteToken, username, email, password }),
     }).then((r) => {
-      token = r.token;
-      userId = r.userId;
-      localStorage.setItem('docflow-token', token);
-      localStorage.setItem('docflow-userId', userId);
+      if (r?.token) {
+        token = r.token;
+        localStorage.setItem('docflow-token', token);
+      }
       return r;
     }),
 
-  me: () => {
-    const resToken = token;
-    return request('/auth/me').then((r) => r);
-  },
+  me: () => request('/auth/me'),
 
   logout: () => {
     token = '';
-    userId = '';
     localStorage.removeItem('docflow-token');
-    localStorage.removeItem('docflow-userId');
+    localStorage.removeItem('docflow-isAdmin');
   },
+
+  // ─── Admin ───
+  adminUsers: () => request('/admin/users'),
+  adminDeleteUser: (id) => request(`/admin/users/${id}`, { method: 'DELETE' }),
+  adminInvite: (email) => request('/admin/invite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  }),
+  adminInvitations: () => request('/admin/invitations'),
 
   // ─── Invitations ───
   createInvite: (projectId, email, role) =>

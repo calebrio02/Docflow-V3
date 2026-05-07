@@ -2,55 +2,68 @@
 
 ## Architecture
 
-- **Frontend:** React 19 + Vite 6 + BlockNote (`@blocknote/react` 0.50) + TipTap. Everything in `src/App.jsx`. Tailwind CSS.
-- **Backend:** Express 4 + PostgreSQL 16 in `server/server.js`. Auto-creates tables on startup via `initDB()`.
-- **Auth:** Bearer token stored in `localStorage('docflow-token')`. Server validates against `process.env.AUTH_TOKEN` (default: `docflow-production-token-7f8a9b2c`). Default creds: `admin` / `admin123`.
-- **Storage:** Document draft content → `documents.content` (JSONB). Published content → `documents.published_content` (JSONB). Files → `server/data/uploads` (shared Docker volume).
-- **Frontend routes:** `/` = editor, `/share/:token` = public read-only, `/invite/:token` = accept invite.
+- **Frontend:** React 19 + Vite 6 + BlockNote 0.50 + TipTap extensions (image/video resize). Tailwind CSS 3 + `darkMode: 'class'` + Mantine 9. All in `src/App.jsx`.
+- **Backend:** Express 4 + PostgreSQL 16 in `server/server.js`. JWT auth (jsonwebtoken, 7-day expiry). Auto-creates tables on startup via `runMigrations()`.
+- **Auth:** JWT stored in `localStorage('docflow-token')`. Server validates via `JWT_SECRET` env (default: `docflow-jwt-secret-2025-change-in-production`). Default creds: `admin` / `admin123`.
+- **Roles:** `viewer(1) < editor(2) < owner(3)` — enforced per-project via `requireRole()`.
+- **Storage:** Draft content → `documents.content` (JSONB). Published content → `documents.published_content` (JSONB). File uploads → `server/data/uploads` (multer, auto-WebP via sharp).
+- **Routes:** `/` = dashboard, `/project/:id` = workspace, `/document/:id` = editor, `/share/:token` = public read-only, `/invite/:token` = accept invite.
 
 ## Commands
 
 ```bash
-npm run dev              # Vite dev server → http://localhost:3000
-npm run dev:api          # Express API → http://localhost:4000
-npm run build            # → dist/
-docker compose up        # Full stack → http://localhost:8090
-docker compose build --no-cache   # Mandatory after every frontend change (nginx caches with expires 1y)
-docker compose down -v   # Wipe all data (volumes)
+npm install                         # Install deps
+npm run dev                         # Vite dev server → http://localhost:3000
+npm run dev:api                     # Express API → http://localhost:4000 (node --watch, hot reload)
+npm run dev:all                     # Both servers concurrently
+npm run build                       # → dist/
+docker compose up                   # Full stack (Nginx + API + DB) → http://localhost:8090
+docker compose build --no-cache     # Mandatory after every frontend change (nginx: 1y cache)
+docker compose down -v              # Wipe all data (volumes)
 ```
 
-`npm run dev:all` (concurrently) is defined in `package.json` but `concurrently` is **not installed** — install it first or run the two commands separately.
+## Environment
 
-## Auth flow
+| Variable | Default | Where used |
+|----------|---------|------------|
+| `JWT_SECRET` | `docflow-jwt-secret-2025-change-in-production` | server/server.js |
+| `AUTH_TOKEN` | `docflow-production-token-7f8a9b2c` | Docker Compose (legacy) |
+| `DATABASE_URL` | `postgresql://docflow:docflow@db:5432/docflow` | Docker Compose API |
+| `PORT` | `4000` | Docker Compose API |
 
-- `POST /api/auth/login` → `{ token, userId, username, email }`. Frontend saves `token` to `localStorage('docflow-token')` and `userId` to `localStorage('docflow-userId')`.
-- `POST /api/auth/register` — only works with `invitationToken` (invitation-only signup).
-- `POST /api/invitations/accept` — used by invite acceptance view.
+`docker-compose.prod.yml` — identical but omits API port mapping (expects reverse proxy).
 
 ## Gotchas
 
-- **`X-User-Id` header required.** Every request to a protected endpoint must include `X-User-Id` header with the integer userId from login response. `api.js` handles this automatically via `localStorage('docflow-userId')`.
 - **PostgreSQL JSONB cast.** `'[]'` is `text`, not `jsonb`. Always use `::jsonb`: `COALESCE($4::jsonb, '[]'::jsonb)`.
 - **PUT parameter indexing.** Dynamic UPDATE queries must track `${idx}` carefully — params array and SQL placeholders must align exactly.
 - **Toolbar buttons use `onMouseDown={(e) => e.preventDefault()} + onClick`.** TipTap steals focus on mousedown.
-- **`initDB()` runs migrations safely.** It no longer drops tables on startup.
-- **BlockNote integrated.** Full integration is now in `src/components/Editor/BlockNoteEditor.jsx`.
-- **`concurrently` is installed.** `npm run dev:all` works out of the box.
+- **`initDB()` / `runMigrations()` runs safely on startup.** Creates tables, adds columns via `DO $$ BEGIN ... END $$` blocks (not `try/catch` which aborts PostgreSQL transactions).
+- **Vite proxies `/api` to `http://localhost:4000`.** During local dev, API calls go through the Vite dev server.
+- **Docker uses Node 20 Alpine** for both stages (frontend Dockerfile + server/Dockerfile). Server Dockerfile installs sharp deps (vips-dev, fftw-dev, libjpeg-turbo-dev, libpng-dev, g++, make, python3).
+- **Nginx serves static files + proxies `/api/`** to `api:4000` + serves `/uploads/` from shared volume. SPA fallback for all other routes.
+- **Documents have draft vs published states.** Editing modifies `content`; `createRelease` snapshots content to `published_content`. Copying a document clones content and preserves releases as history.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `src/App.jsx` | Main application entry and state management. |
-| `src/components/` | Modular UI components (Auth, Modals, Panels, Editor). |
-| `src/api.js` | Fetch client. Stores `docflow-token` and `docflow-userId` in localStorage. |
-| `server/server.js` | Express API: auth, projects, members, invites, folders, documents, releases, share, upload, export. |
+| `src/App.jsx` | Main app: Dashboard, Workspace, EditorView, ShareView, InviteRoute. |
+| `src/components/Editor/BlockNoteEditor.jsx` | BlockNote editor wrapper with dark mode detection. |
+| `src/components/auth/AuthScreens.jsx` | Login, Register (invitation-only), InviteAccept screens. |
+| `src/components/modals/DocModals.jsx` | CreateProject, Release, Share, Invite, ReleaseView, Rename modals. |
+| `src/components/panels/SidePanels.jsx` | MembersPanel, ReleasePanel (changelog). |
+| `src/components/admin/AdminPanel.jsx` | Admin: Users, Invite, Invitations tabs. |
+| `src/api.js` | Fetch client. Stores `docflow-token` in localStorage. Handles 401 cleanup. |
+| `server/server.js` | Express API: auth, admin, projects, members, invites, folders, documents, releases, share, upload, export. |
+| `server/Dockerfile` | Server container with sharp/image optimization deps. |
+| `docker/nginx/default.conf` | Nginx: static serve, `/api/` proxy, `/uploads/` volume, SPA fallback, gzip. |
+| `src/extensions/imageResize.js` | Custom TipTap image extension with drag-to-resize. |
+| `src/extensions/videoResize.js` | Custom TipTap video node extension with proportional resize. |
 
 ## Conventions
 
 - No lint/typecheck/test scripts. Verify manually.
 - Tailwind utility classes throughout. No CSS modules.
 - English UI strings.
-- All data migrations use `DO $$ BEGIN ... END $$` blocks (not `try/catch` which aborts PostgreSQL transactions).
-- Documents belong to projects. Folders are sub-nested within projects.
-- Copying a document clones content and preserves releases as history.
+- Documents belong to projects. Folders are nested via `parent_folder_id`.

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import React from 'react';
 import { Routes, Route, useNavigate, useParams, Link } from 'react-router-dom';
 import {
-  FileText, Folder, Plus, LogOut, Loader2,
+  FileText, Folder, Plus, Loader2,
   Users, GitCommit, Copy, Eye, Unlock, Lock, Clock,
   Check, Trash2, ChevronRight, Home, ChevronLeft, Moon, Sun
 } from 'lucide-react';
@@ -15,6 +15,7 @@ import {
 } from './components/modals/DocModals';
 import { MembersPanel, ReleasePanel } from './components/panels/SidePanels';
 import { BlockNoteEditor } from './components/Editor/BlockNoteEditor';
+import { UserDropdown } from './components/admin/AdminPanel';
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('docflow-token'));
@@ -82,16 +83,13 @@ export default function App() {
           </Link>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg transition-colors" style={{ color: 'var(--text-muted)' }}>
-            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-          <div className="h-8 w-8 bg-gradient-to-tr from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-xs font-bold text-white">
-            {currentUser?.username?.charAt(0).toUpperCase()}
-          </div>
-          <button onClick={handleLogout} className="p-2 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors" style={{ color: 'var(--text-muted)' }} title="Logout">
-            <LogOut size={18} />
-          </button>
+        <div className="flex items-center gap-2">
+          <UserDropdown
+            user={currentUser}
+            onLogout={handleLogout}
+            darkMode={darkMode}
+            onToggleDark={() => setDarkMode(!darkMode)}
+          />
         </div>
       </nav>
 
