@@ -129,6 +129,8 @@ export const api = {
       body: JSON.stringify({ role }),
     }),
 
+  searchUsers: (q) => request(`/users/search?q=${encodeURIComponent(q)}`),
+
   // ─── Folders ───
   projectFolders: (projectId) => request(`/projects/${projectId}/folders`),
 

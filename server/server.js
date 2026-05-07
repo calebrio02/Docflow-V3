@@ -609,6 +609,22 @@ app.patch('/api/projects/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// ─── User Search (for adding existing users as members) ───
+app.get('/api/users/search', authMiddleware, async (req, res) => {
+  const { q } = req.query;
+  if (!q || q.trim().length < 2) return res.json([]);
+  try {
+    const result = await pool.query(
+      `SELECT id, username, email FROM users WHERE username ILIKE $1 ORDER BY username LIMIT 10`,
+      [`%${q.trim()}%`]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('User search error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ─── Project Members ───
 app.get('/api/projects/:id/members', authMiddleware, async (req, res) => {
   try {

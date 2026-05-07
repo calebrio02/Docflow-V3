@@ -201,6 +201,9 @@ function Workspace() {
   
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [showDocModal, setShowDocModal] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [members, setMembers] = useState([]);
 
   const loadData = useCallback(async () => {
     try {
@@ -212,11 +215,6 @@ function Workspace() {
         const d = await api.projectDocuments(projectId, folderId);
         setFolders(flds);
         setDocs(d);
-        // Basic path inference if navigating directly. A real app needs an API to get full path.
-        if (folderPath.length === 0 || folderPath[folderPath.length-1].id !== folderId) {
-           // just fetch the current folder to at least show its name
-           // docflow doesn't have a getFolder endpoint, so breadcrumbs might be incomplete if deep linking.
-        }
       } else {
         const flds = await api.projectFolders(projectId);
         const d = await api.projectDocuments(projectId);
@@ -224,6 +222,9 @@ function Workspace() {
         setDocs(d);
         setFolderPath([]);
       }
+
+      const m = await api.projectMembers(projectId);
+      setMembers(m);
     } catch (err) { console.error(err); }
   }, [projectId, folderId]);
 
@@ -251,9 +252,34 @@ function Workspace() {
     if(window.confirm('Delete folder?')) { await api.deleteFolder(id); loadData(); }
   };
 
+  const handleRemoveMember = async (userId) => {
+    await api.removeMember(projectId, userId);
+    const m = await api.projectMembers(projectId);
+    setMembers(m);
+  };
+
+  const handleRoleChange = async (userId, role) => {
+    // null userId is a reload-only signal sent by MembersPanel after adding a user directly
+    if (userId !== null) {
+      await api.updateMemberRole(projectId, userId, role);
+    }
+    const m = await api.projectMembers(projectId);
+    setMembers(m);
+  };
+
+  const handleInviteMember = async (email, role) => {
+    const result = await api.createInvite(projectId, email, role);
+    setShowInvite(false);
+    if (result?.invitationLink) {
+      const fullLink = `${window.location.origin}${result.invitationLink}`;
+      prompt('Share this invite link with the user:', fullLink);
+    }
+  };
+
   if (!project) return null;
 
   const canEdit = project.role === 'owner' || project.role === 'editor';
+  const isOwner = project.role === 'owner';
 
   return (
     <main className="flex-1 overflow-y-auto p-10 relative">
@@ -275,6 +301,9 @@ function Workspace() {
           <h1 className="text-3xl font-extrabold">{folderId ? 'Folder Contents' : project.name}</h1>
           {canEdit && (
             <div className="flex gap-3">
+              <button onClick={() => setShowMembers(!showMembers)} className={`affine-button-outline px-4 py-2 flex items-center gap-2 ${showMembers ? 'border-blue-500 text-blue-500' : ''}`}>
+                <Users size={18} /> Team
+              </button>
               <button onClick={() => setShowFolderModal(true)} className="affine-button-outline px-4 py-2 flex items-center gap-2">
                 <Folder size={18} /> New Folder
               </button>
@@ -333,6 +362,18 @@ function Workspace() {
       </div>
       <SubfolderModal visible={showFolderModal} onClose={() => setShowFolderModal(false)} onSubmit={handleCreateFolder} parentId={folderId} />
       <RenameModal visible={showDocModal} title="New Document Title" initialValue="" onClose={() => setShowDocModal(false)} onSubmit={handleCreateDoc} />
+      {showMembers && (
+        <MembersPanel
+          members={members}
+          userRole={project.role}
+          projectId={projectId}
+          onRemoveMember={handleRemoveMember}
+          onRoleChange={handleRoleChange}
+          onInvite={() => setShowInvite(true)}
+          onClose={() => setShowMembers(false)}
+        />
+      )}
+      <InviteModal visible={showInvite} onClose={() => setShowInvite(false)} onInvite={handleInviteMember} />
     </main>
   );
 }
@@ -343,17 +384,14 @@ function EditorView() {
   const [doc, setDoc] = useState(null);
   const [project, setProject] = useState(null);
   const [releases, setReleases] = useState([]);
-  const [members, setMembers] = useState([]);
   
   const [draftContent, setDraftContent] = useState([]);
   const [saveState, setSaveState] = useState(false);
   const saveTimeoutRef = useRef(null);
 
-  const [showMembers, setShowMembers] = useState(false);
   const [showReleases, setShowReleases] = useState(false);
   const [showReleaseModal, setShowReleaseModal] = useState(false);
   const [showShare, setShowShare] = useState(false);
-  const [showInvite, setShowInvite] = useState(false);
   const [activeRelease, setActiveRelease] = useState(null);
   const [showReleaseView, setShowReleaseView] = useState(false);
 
@@ -368,9 +406,6 @@ function EditorView() {
       
       const r = await api.getDocumentReleases(docId);
       setReleases(r);
-
-      const m = await api.projectMembers(d.project_id);
-      setMembers(m);
     } catch (err) { console.error(err); }
   }, [docId]);
 
@@ -435,16 +470,7 @@ function EditorView() {
           
           <div className="flex items-center gap-3">
              <div className="flex items-center gap-1 rounded-lg p-1 mr-2" style={{ backgroundColor: 'var(--bg-hover)' }}>
-                <button onClick={() => { setShowMembers(!showMembers); setShowReleases(false); }}
-                  className="px-3 py-1.5 text-sm font-bold rounded-md transition-all flex items-center gap-2"
-                  style={{ 
-                    backgroundColor: showMembers ? 'var(--bg-card)' : 'transparent',
-                    color: showMembers ? 'var(--primary)' : 'var(--text-muted)',
-                    boxShadow: showMembers ? 'var(--shadow-sm)' : 'none'
-                  }}>
-                  <Users size={16} /> Team
-                </button>
-                <button onClick={() => { setShowReleases(!showReleases); setShowMembers(false); }}
+                <button onClick={() => { setShowReleases(!showReleases); }}
                   className="px-3 py-1.5 text-sm font-bold rounded-md transition-all flex items-center gap-2"
                   style={{ 
                     backgroundColor: showReleases ? 'var(--bg-card)' : 'transparent',
@@ -488,16 +514,12 @@ function EditorView() {
         </div>
       </main>
 
-      {showMembers && (
-        <MembersPanel members={members} userRole={project.role} onRemoveMember={() => {}} onRoleChange={() => {}} onInvite={() => setShowInvite(true)} />
-      )}
       {showReleases && (
         <ReleasePanel releases={releases} userRole={project.role} onViewRelease={(r) => { setActiveRelease(r); setShowReleaseView(true); }} onOpenPublish={() => setShowReleaseModal(true)} />
       )}
 
       <ReleaseModal visible={showReleaseModal} onClose={() => setShowReleaseModal(false)} onSave={handlePublishRelease} />
       <ShareModal visible={showShare} onClose={() => setShowShare(false)} isPublic={doc.is_public} onToggleShare={handleToggleShare} shareUrl={doc ? `${window.location.origin}/share/${doc.public_token}` : ''} />
-      <InviteModal visible={showInvite} onClose={() => setShowInvite(false)} onInvite={() => {}} />
       <ReleaseViewModal release={activeRelease} visible={showReleaseView} onClose={() => setShowReleaseView(false)} />
     </>
   );
